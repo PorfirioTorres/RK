@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asistente</title>
+<style>
+  :root { --fondo:#14142a; --panel:#262645; --acento:#39c5bb; --texto:#f2f2fa; }
+  * { box-sizing: border-box; }
+  html, body { height:100%; }
+  body { margin:0; display:flex; flex-direction:column; align-items:center;
+         background:var(--fondo); color:var(--texto); font-family:system-ui,sans-serif; }
+  #escena { position:relative; flex:1 1 auto; min-height:0; width:100%; max-width:760px; }
+  #lienzo { position:absolute; inset:0; width:100%; height:100%; }
+  #burbuja { position:absolute; left:12px; right:12px; bottom:8px; min-height:64px;
+             background:rgba(38,38,69,.88); border:2px solid var(--acento); border-radius:16px;
+             padding:12px 16px; line-height:1.4; backdrop-filter:blur(4px); }
+  #nombre { font-weight:700; color:var(--acento); font-size:.85rem; margin-bottom:2px; }
+  #entrada { flex:0 0 auto; width:100%; max-width:760px; display:flex; gap:8px; padding:12px; }
+  #entrada input { flex:1; padding:12px 14px; border-radius:12px; border:2px solid var(--panel);
+                   background:var(--panel); color:var(--texto); font-size:1rem; outline:none; }
+  #entrada input:focus { border-color:var(--acento); }
+  button { padding:0 18px; border:0; border-radius:12px; background:var(--acento);
+           color:#0d2a28; font-weight:700; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:wait; }
+  #herramientas { position:absolute; top:8px; left:8px; display:flex; flex-wrap:wrap; gap:4px;
+                  opacity:.55; z-index:2; }
+  #herramientas:hover { opacity:1; }
+  #herramientas button, #ajustes button { padding:4px 8px; font-size:.72rem; border-radius:8px;
+                         background:var(--panel); color:var(--texto); font-weight:400; }
+  #ajustes { position:absolute; top:40px; left:8px; width:270px; max-height:calc(100% - 150px);
+             overflow:auto; z-index:2; background:rgba(38,38,69,.94); border:1px solid var(--acento);
+             border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:4px; }
+  #ajustes[hidden] { display:none; }
+  #ajustes label { display:flex; flex-direction:column; font-size:.68rem; color:#b9b9d6; }
+  #ajustes input[type=range] { width:100%; accent-color:var(--acento); }
+  #ajustes .nota { font-size:.68rem; color:#b9b9d6; margin-bottom:4px; }
+</style>
+</head>
+<body>
+  <div id="escena">
+    <canvas id="lienzo"></canvas>
+    <div id="herramientas" title="Prueba las expresiones sin hablar con el modelo de lenguaje"></div>
+    <div id="ajustes" hidden>
+      <div class="nota">Mueve los deslizadores para ver la cara en vivo. Cuando te guste,
+        pulsa «copiar valores» y pega el resultado dentro de la emoción que corresponda en
+        <code>EMOCIONES</code> (index.html).</div>
+    </div>
+    <div id="burbuja">
+      <div id="nombre">...</div>
+      <div id="texto">Cargando...</div>
+    </div>
+  </div>
+  <form id="entrada">
+    <input id="msg" autocomplete="off" placeholder="Escribe algo..." autofocus>
+    <button id="enviar">Enviar</button>
+    <button id="reset" type="button" title="Borrar la conversación">Reiniciar</button>
+  </form>
+
+<!-- Librerías (necesitan internet la primera vez). El orden importa. -->
+<script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
+
+<script>
+// =====================================================================
+//  CONFIGURACIÓN: lo que cambias cuando uses otro modelo
+//  (el nombre y la personalidad se cambian en servidor.py)
+// =====================================================================
+const MODELO_URL = "/modelo/miku.model3.json";
+const ZOOM = 1.0;            // 1 = cuerpo completo. Prueba 1.8 para ver de la cintura hacia arriba
+const DESPLAZAMIENTO_Y = 0;  // píxeles; positivo baja el modelo, negativo lo sube
+
+// Parámetros que controlan la cara. Los nombres (PARAM_...) son los del modelo Miku;
+// otro modelo puede usar otros (míralos en su archivo .cdi3.json).
+const BASE = {
+  PARAM_EYE_L_SMILE: 0, PARAM_EYE_R_SMILE: 0,
+  PARAM_BROW_L_Y: 0, PARAM_BROW_R_Y: 0,
+  PARAM_BROW_L_ANGLE: 0, PARAM_BROW_R_ANGLE: 0,
+  PARAM_BROW_L_FORM: 0, PARAM_BROW_R_FORM: 0,
+  PARAM_MOUTH_FORM: 0, PARAM_MOUTH_OPEN_Y: 0, PARAM_CHEEK: 0,
+};
+// Cada emoción solo indica lo que cambia respecto a BASE. Rango típico: -1 a 1 (0 a 1 en sonrisa y rubor).
+// Estos valores son una primera aproximación: ajústalos con el botón «ajustes».
+const EMOCIONES = {
+  neutral: {},
+  feliz: { PARAM_EYE_L_SMILE: 1, PARAM_EYE_R_SMILE: 1, PARAM_MOUTH_FORM: 1,
+           PARAM_BROW_L_Y: .3, PARAM_BROW_R_Y: .3, PARAM_CHEEK: .6 },
+  triste: { PARAM_MOUTH_FORM: -1, PARAM_BROW_L_Y: -.2, PARAM_BROW_R_Y: -.2,
+            PARAM_BROW_L_ANGLE: -.7, PARAM_BROW_R_ANGLE: -.7,
+            PARAM_BROW_L_FORM: -.5, PARAM_BROW_R_FORM: -.5 },
+  sorprendida: { PARAM_BROW_L_Y: 1, PARAM_BROW_R_Y: 1, PARAM_MOUTH_OPEN_Y: .7 },
+  enojada: { PARAM_MOUTH_FORM: -.6, PARAM_BROW_L_Y: -.6, PARAM_BROW_R_Y: -.6,
+             PARAM_BROW_L_ANGLE: .8, PARAM_BROW_R_ANGLE: .8,
+             PARAM_BROW_L_FORM: -.8, PARAM_BROW_R_FORM: -.8 },
+};
+// Animación del modelo (grupo definido en model3.json) que se reproduce con cada emoción. null = ninguna.
+const MOVIMIENTOS = { neutral: null, feliz: "Tap", triste: null, sorprendida: "Flick", enojada: "Flick" };
+
+// =====================================================================
+//  Modelo Live2D
+// =====================================================================
+const escena = document.getElementById("escena");
+const texto = document.getElementById("texto");
+
+let model = null, anchoBase = 1, altoBase = 1, app = null;
+let objetivo = { ...BASE };
+const actual = { ...BASE };
+let hablando = false;
+let personaje = { nombre: "Asistente", saludo: "Hola.", reinicio: "Empecemos de nuevo." };
+
+function fijarEmocion(nombre) {
+  objetivo = { ...BASE, ...(EMOCIONES[nombre] || {}) };
+  sincronizarSliders();
+  const grupo = MOVIMIENTOS[nombre];
+  if (model && grupo) { try { model.motion(grupo); } catch (e) { /* sin animación */ } }
+}
+
+function colocar() {
+  if (!model || !app) return;
+  const W = app.screen.width, H = app.screen.height;
+  const escala = Math.min(W / anchoBase, H / altoBase) * 0.95 * ZOOM;
+  model.scale.set(escala);
+  model.anchor.set(0.5, 0);
+  const alto = altoBase * escala;
+  model.x = W / 2;
+  model.y = (H > alto ? (H - alto) / 2 : 0) + DESPLAZAMIENTO_Y;
+}
+
+async function cargarModelo() {
+  if (typeof PIXI === "undefined" || !PIXI.live2d || typeof Live2DCubismCore === "undefined") {
+    throw new Error("No se cargaron las librerías (¿hay internet?).");
+  }
+  try { PIXI.live2d.Live2DModel.registerTicker(PIXI.Ticker); } catch (e) {}
+  app = new PIXI.Application({
+    view: document.getElementById("lienzo"), resizeTo: escena, backgroundAlpha: 0,
+    antialias: true, autoDensity: true, resolution: window.devicePixelRatio || 1,
+  });
+  model = await PIXI.live2d.Live2DModel.from(MODELO_URL);
+  anchoBase = model.width; altoBase = model.height;
+  app.stage.addChild(model);
+  colocar();
+  app.renderer.on("resize", colocar);
+
+  // Se ejecuta en cada fotograma, después de las animaciones y antes de dibujar:
+  // aquí aplicamos la expresión (suavizada) y el movimiento de la boca al hablar.
+  model.internalModel.on("beforeModelUpdate", () => {
+    const core = model.internalModel.coreModel;
+    const t = performance.now() / 1000;
+    for (const id in objetivo) {
+      actual[id] += (objetivo[id] - actual[id]) * 0.12;
+      let v = actual[id];
+      if (id === "PARAM_MOUTH_OPEN_Y" && hablando) {
+        const habla = 0.2 + 0.5 * Math.abs(Math.sin(t * 11)) * (0.6 + 0.4 * Math.sin(t * 3.7));
+        v = Math.max(v, habla);
+      }
+      core.setParameterValueById(id, v);
+    }
+  });
+}
+
+// =====================================================================
+//  Botones de prueba y panel de ajuste de expresiones
+// =====================================================================
+const herramientas = document.getElementById("herramientas");
+const panel = document.getElementById("ajustes");
+const sliders = {};
+
+for (const nombre of Object.keys(EMOCIONES)) {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = nombre;
+  b.addEventListener("click", () => fijarEmocion(nombre));
+  herramientas.appendChild(b);
+}
+
+const botonAjustes = document.createElement("button");
+botonAjustes.type = "button"; botonAjustes.textContent = "ajustes";
+botonAjustes.addEventListener("click", () => { panel.hidden = !panel.hidden; });
+herramientas.appendChild(botonAjustes);
+
+for (const id of Object.keys(BASE)) {
+  const fila = document.createElement("label");
+  const etiqueta = document.createElement("span");
+  etiqueta.textContent = id.replace("PARAM_", "");
+  const r = document.createElement("input");
+  r.type = "range"; r.min = -1; r.max = 1; r.step = 0.05; r.value = 0;
+  r.addEventListener("input", () => { objetivo[id] = parseFloat(r.value); });
+  sliders[id] = r;
+  fila.append(etiqueta, r);
+  panel.appendChild(fila);
+}
+
+const botonCopiar = document.createElement("button");
+botonCopiar.type = "button"; botonCopiar.textContent = "copiar valores";
+botonCopiar.addEventListener("click", async () => {
+  const salida = {};
+  for (const id in objetivo) {
+    if (Math.abs(objetivo[id]) > 0.001) salida[id] = Math.round(objetivo[id] * 100) / 100;
+  }
+  const t = JSON.stringify(salida);
+  try { await navigator.clipboard.writeText(t); botonCopiar.textContent = "¡copiado!"; }
+  catch (e) { window.prompt("Copia estos valores:", t); }
+  setTimeout(() => { botonCopiar.textContent = "copiar valores"; }, 1500);
+});
+panel.appendChild(botonCopiar);
+
+function sincronizarSliders() {
+  for (const id in sliders) sliders[id].value = objetivo[id];
+}
+
+// =====================================================================
+//  Chat
+// =====================================================================
+const form = document.getElementById("entrada");
+const msg = document.getElementById("msg");
+const enviar = document.getElementById("enviar");
+let temporizador = null;
+
+function escribir(t) {            // efecto de máquina de escribir + boca moviéndose
+  clearInterval(temporizador);
+  texto.textContent = "";
+  hablando = true;
+  let i = 0;
+  temporizador = setInterval(() => {
+    texto.textContent += t[i++];
+    if (i >= t.length) { clearInterval(temporizador); hablando = false; }
+  }, 28);
+}
+
+form.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const t = msg.value.trim();
+  if (!t) return;
+  msg.value = "";
+  enviar.disabled = true;
+  clearInterval(temporizador); hablando = false;
+  texto.textContent = "...";
+  try {
+    const r = await fetch("/chat", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto: t }) });
+    const d = await r.json();
+    fijarEmocion(d.emocion || "neutral");
+    escribir(d.texto);
+  } catch (e) {
+    fijarEmocion("triste");
+    texto.textContent = "No pude conectar con el servidor.";
+  }
+  enviar.disabled = false;
+  msg.focus();
+});
+
+document.getElementById("reset").addEventListener("click", async () => {
+  try { await fetch("/reset", { method: "POST" }); } catch (e) {}
+  fijarEmocion("neutral");
+  escribir(personaje.reinicio);
+});
+
+// =====================================================================
+//  Inicio
+// =====================================================================
+async function iniciar() {
+  try {
+    const r = await fetch("/info");
+    personaje = { ...personaje, ...(await r.json()) };
+  } catch (e) { /* se usan los valores por defecto */ }
+  document.title = personaje.nombre;
+  document.getElementById("nombre").textContent = personaje.nombre;
+  texto.textContent = "Cargando a " + personaje.nombre + "...";
+
+  try {
+    await cargarModelo();
+    fijarEmocion("neutral");
+    escribir(personaje.saludo);
+  } catch (e) {
+    console.error(e);
+    texto.textContent = "No pude cargar el modelo (" + MODELO_URL + "): " + e.message +
+      " Revisa que la carpeta 'modelo' tenga el contenido de 'runtime'. Aun así puedes chatear.";
+  }
+}
+iniciar();
+</script>
+</body>
+</html>
