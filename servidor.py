@@ -7,8 +7,11 @@ Estructura de carpetas:
     historial.json     <- se crea solo; guarda la conversación entre sesiones
 
 Requisitos:
-    pip install fastapi uvicorn ollama pydantic
+    pip install -r requirements.txt
     ollama pull qwen2.5:3b
+
+Voz: usa edge-tts, que envía el texto de cada respuesta a un servicio online de
+Microsoft para generar el audio (necesita internet; el modelo de lenguaje sigue siendo local).
 
 Ejecutar (dentro de esta carpeta):
     uvicorn servidor:app --reload
@@ -16,14 +19,20 @@ Luego abre http://127.0.0.1:8000
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Literal
 
 import ollama
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+try:
+    import edge_tts
+except ImportError:  # el chat funciona igual, solo sin voz
+    edge_tts = None
 
 # ---------- Configuración del personaje ----------
 NOMBRE = "Ryuko"
@@ -41,6 +50,13 @@ Responde SIEMPRE en JSON con dos campos:
 - "emocion": una de estas opciones exactas: neutral, feliz, triste, sorprendida, enojada.
 Elige la emoción que mejor encaje con lo que estás diciendo."""
 
+# ---------- Configuración de la voz (edge-tts) ----------
+# Otras voces en español: es-MX-JorgeNeural, es-ES-ElviraNeural, es-AR-ElenaNeural, es-CO-SalomeNeural
+# Lista completa: en PowerShell ->  edge-tts --list-voices
+VOZ = "en-US-AvaMultilingualNeural"
+VOZ_VELOCIDAD = "+8%"   # "-10%" más lenta, "+20%" más rápida
+VOZ_TONO = "+0Hz"       # "-10Hz" más grave, "+10Hz" más aguda
+
 MODELO = "qwen2.5:3b"
 MAX_MENSAJES = 20  # mensajes de conversación que se recuerdan (sin contar la personalidad)
 
@@ -57,6 +73,10 @@ class Respuesta(BaseModel):
 
 
 class Mensaje(BaseModel):
+    texto: str
+
+
+class TextoVoz(BaseModel):
     texto: str
 
 
@@ -124,6 +144,29 @@ def reset():
     del historial[1:]
     guardar_historial()
     return {"ok": True}
+
+
+@app.post("/voz")
+async def voz(entrada: TextoVoz):
+    """Convierte un texto en audio mp3 con edge-tts."""
+    if edge_tts is None:
+        raise HTTPException(503, "falta instalar edge-tts (pip install edge-tts)")
+    # Quitar símbolos y emojis que el sintetizador leería en voz alta
+    texto = re.sub(r"[*_~`#<>]+", "", entrada.texto)
+    texto = re.sub(r"[\U0001F300-\U0001FAFF☀-➿]", "", texto).strip()[:600]
+    if not texto:
+        raise HTTPException(400, "texto vacío")
+    try:
+        comunicar = edge_tts.Communicate(texto, VOZ, rate=VOZ_VELOCIDAD, pitch=VOZ_TONO)
+        audio = bytearray()
+        async for trozo in comunicar.stream():
+            if trozo["type"] == "audio":
+                audio.extend(trozo["data"])
+    except Exception as e:
+        raise HTTPException(503, f"no pude generar la voz (¿hay internet?): {e}")
+    if not audio:
+        raise HTTPException(503, "el servicio de voz no devolvió audio")
+    return Response(content=bytes(audio), media_type="audio/mpeg")
 
 
 # Archivos del modelo Live2D (moc3, texturas, motions...)

@@ -16,6 +16,7 @@
              background:rgba(38,38,69,.88); border:2px solid var(--acento); border-radius:16px;
              padding:12px 16px; line-height:1.4; backdrop-filter:blur(4px); }
   #nombre { font-weight:700; color:var(--acento); font-size:.85rem; margin-bottom:2px; }
+  #estado { color:#b9b9d6; font-weight:400; margin-left:8px; }
   #entrada { flex:0 0 auto; width:100%; max-width:760px; display:flex; gap:8px; padding:12px; }
   #entrada input { flex:1; padding:12px 14px; border-radius:12px; border:2px solid var(--panel);
                    background:var(--panel); color:var(--texto); font-size:1rem; outline:none; }
@@ -47,7 +48,7 @@
         <code>EMOCIONES</code> (index.html).</div>
     </div>
     <div id="burbuja">
-      <div id="nombre">...</div>
+      <div id="nombre"><span id="nombre-texto">...</span><span id="estado"></span></div>
       <div id="texto">Cargando...</div>
     </div>
   </div>
@@ -107,6 +108,7 @@ let model = null, anchoBase = 1, altoBase = 1, app = null;
 let objetivo = { ...BASE };
 const actual = { ...BASE };
 let hablando = false;
+let audioActual = null, nivelBoca = 0;   // voz en reproducción y apertura de boca suavizada
 let personaje = { nombre: "Asistente", saludo: "Hola.", reinicio: "Empecemos de nuevo." };
 
 function fijarEmocion(nombre) {
@@ -150,9 +152,14 @@ async function cargarModelo() {
     for (const id in objetivo) {
       actual[id] += (objetivo[id] - actual[id]) * 0.12;
       let v = actual[id];
-      if (id === "PARAM_MOUTH_OPEN_Y" && hablando) {
-        const habla = 0.2 + 0.5 * Math.abs(Math.sin(t * 11)) * (0.6 + 0.4 * Math.sin(t * 3.7));
-        v = Math.max(v, habla);
+      if (id === "PARAM_MOUTH_OPEN_Y") {
+        if (audioActual && !audioActual.paused) {      // sigue el volumen de la voz real
+          nivelBoca += (medirNivel() - nivelBoca) * 0.5;
+          v = Math.max(v, nivelBoca * 0.9);
+        } else if (hablando) {                          // sin audio: movimiento simulado
+          const habla = 0.2 + 0.5 * Math.abs(Math.sin(t * 11)) * (0.6 + 0.4 * Math.sin(t * 3.7));
+          v = Math.max(v, habla);
+        }
       }
       core.setParameterValueById(id, v);
     }
@@ -211,20 +218,116 @@ function sincronizarSliders() {
 // =====================================================================
 //  Chat
 // =====================================================================
+// ---------- Voz (el audio lo genera edge-tts en el servidor) ----------
+let vozActiva = true;
+try { vozActiva = localStorage.getItem("vozActiva") !== "no"; } catch (e) {}
+let ctxAudio = null, analizador = null, bufAudio = null;
+const estado = document.getElementById("estado");
+
+const botonVoz = document.createElement("button");
+botonVoz.type = "button";
+function pintarBotonVoz() { botonVoz.textContent = "voz: " + (vozActiva ? "sí" : "no"); }
+botonVoz.addEventListener("click", () => {
+  vozActiva = !vozActiva;
+  try { localStorage.setItem("vozActiva", vozActiva ? "si" : "no"); } catch (e) {}
+  if (!vozActiva) detenerVoz();
+  estado.textContent = "";
+  pintarBotonVoz();
+});
+pintarBotonVoz();
+herramientas.appendChild(botonVoz);
+
+function prepararAudio() {
+  if (!ctxAudio) {
+    ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
+    analizador = ctxAudio.createAnalyser();
+    analizador.fftSize = 512;
+    analizador.connect(ctxAudio.destination);
+    bufAudio = new Uint8Array(analizador.fftSize);
+  }
+  if (ctxAudio.state === "suspended") ctxAudio.resume();
+}
+
+function medirNivel() {            // volumen actual del audio, de 0 a 1
+  analizador.getByteTimeDomainData(bufAudio);
+  let suma = 0;
+  for (const b of bufAudio) { const x = (b - 128) / 128; suma += x * x; }
+  return Math.min(1, Math.sqrt(suma / bufAudio.length) * 5);
+}
+
+function detenerVoz() {
+  if (audioActual) { audioActual.pause(); audioActual = null; }
+  nivelBoca = 0;
+}
+
+async function cargarVoz(t) {      // pide el audio al servidor; devuelve un <audio> listo o null
+  detenerVoz();
+  if (!vozActiva) return null;
+  // Sin ninguna interacción previa el navegador bloquea el audio (pasa con el saludo inicial)
+  if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return null;
+  try {
+    const r = await fetch("/voz", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto: t }) });
+    if (!r.ok) {
+      let detalle = "error " + r.status;
+      try { detalle = (await r.json()).detail || detalle; } catch (e) {}
+      throw new Error(detalle);
+    }
+    const url = URL.createObjectURL(await r.blob());
+    const audio = new Audio(url);
+    await new Promise((ok, mal) => {
+      audio.addEventListener("loadedmetadata", ok, { once: true });
+      audio.addEventListener("error", () => mal(new Error("el navegador no pudo leer el audio")), { once: true });
+    });
+    audio.addEventListener("ended", () => {
+      URL.revokeObjectURL(url);
+      if (audioActual === audio) audioActual = null;
+    });
+    estado.textContent = "";
+    return audio;
+  } catch (e) {
+    console.warn("Voz no disponible:", e);
+    estado.textContent = "· sin voz (" + e.message + ")";
+    return null;
+  }
+}
+
+async function reproducir(audio) {  // conecta el audio al analizador y lo inicia
+  try {
+    prepararAudio();
+    ctxAudio.createMediaElementSource(audio).connect(analizador);
+    audioActual = audio;
+    await audio.play();
+    return true;
+  } catch (e) {
+    console.warn("No pude reproducir el audio:", e);
+    audioActual = null;
+    return false;
+  }
+}
+
+async function decir(t) {          // texto y voz a la vez; sin voz, solo texto
+  const audio = await cargarVoz(t);
+  const sonando = audio ? await reproducir(audio) : false;
+  const duracion = sonando && isFinite(audio.duration) ? audio.duration * 1000 : null;
+  escribir(t, duracion);
+}
+
 const form = document.getElementById("entrada");
 const msg = document.getElementById("msg");
 const enviar = document.getElementById("enviar");
 let temporizador = null;
 
-function escribir(t) {            // efecto de máquina de escribir + boca moviéndose
+function escribir(t, duracionMs) { // máquina de escribir; con voz, termina junto con el audio
   clearInterval(temporizador);
   texto.textContent = "";
   hablando = true;
+  const paso = duracionMs ? Math.min(90, Math.max(15, duracionMs / t.length)) : 28;
   let i = 0;
   temporizador = setInterval(() => {
     texto.textContent += t[i++];
     if (i >= t.length) { clearInterval(temporizador); hablando = false; }
-  }, 28);
+  }, paso);
 }
 
 form.addEventListener("submit", async (ev) => {
@@ -233,14 +336,14 @@ form.addEventListener("submit", async (ev) => {
   if (!t) return;
   msg.value = "";
   enviar.disabled = true;
-  clearInterval(temporizador); hablando = false;
+  clearInterval(temporizador); hablando = false; detenerVoz();
   texto.textContent = "...";
   try {
     const r = await fetch("/chat", { method: "POST",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto: t }) });
     const d = await r.json();
     fijarEmocion(d.emocion || "neutral");
-    escribir(d.texto);
+    await decir(d.texto);
   } catch (e) {
     fijarEmocion("triste");
     texto.textContent = "No pude conectar con el servidor.";
@@ -252,7 +355,7 @@ form.addEventListener("submit", async (ev) => {
 document.getElementById("reset").addEventListener("click", async () => {
   try { await fetch("/reset", { method: "POST" }); } catch (e) {}
   fijarEmocion("neutral");
-  escribir(personaje.reinicio);
+  await decir(personaje.reinicio);
 });
 
 // =====================================================================
@@ -264,13 +367,13 @@ async function iniciar() {
     personaje = { ...personaje, ...(await r.json()) };
   } catch (e) { /* se usan los valores por defecto */ }
   document.title = personaje.nombre;
-  document.getElementById("nombre").textContent = personaje.nombre;
+  document.getElementById("nombre-texto").textContent = personaje.nombre;
   texto.textContent = "Cargando a " + personaje.nombre + "...";
 
   try {
     await cargarModelo();
     fijarEmocion("neutral");
-    escribir(personaje.saludo);
+    await decir(personaje.saludo);
   } catch (e) {
     console.error(e);
     texto.textContent = "No pude cargar el modelo (" + MODELO_URL + "): " + e.message +
