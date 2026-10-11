@@ -1,0 +1,2 @@
+# RK
+Una IA basica 
