@@ -2,4 +2,6 @@ fastapi
 uvicorn
 ollama
 pydantic
-edge-tts
+piper-tts
+faster-whisper
+numpy

@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Asistente</title>
+<script>
+  // Modo compañera: la app de escritorio abre la página con ?modo=companera
+  if (new URLSearchParams(location.search).get("modo") === "companera") {
+    document.documentElement.classList.add("companera");
+  }
+</script>
 <style>
   :root { --fondo:#14142a; --panel:#262645; --acento:#39c5bb; --texto:#f2f2fa; }
   * { box-sizing: border-box; }
@@ -21,6 +27,21 @@
   #entrada input { flex:1; padding:12px 14px; border-radius:12px; border:2px solid var(--panel);
                    background:var(--panel); color:var(--texto); font-size:1rem; outline:none; }
   #entrada input:focus { border-color:var(--acento); }
+  #mic { padding:0 12px; font-size:1.05rem; background:var(--panel); color:var(--texto);
+         border:2px solid var(--acento); }
+  #mic.escuchando { background:#ff6b8b; border-color:#ff6b8b; animation:pulso 1s ease-in-out infinite; }
+  #silencio { padding:0 8px; font-size:1.05rem; background:var(--panel); color:var(--texto);
+              border:2px solid var(--panel); }
+  #vol { position:relative; display:flex; flex:0 0 auto; }
+  #vol .vol-menu { display:none; position:absolute; bottom:100%; left:50%; transform:translateX(-50%);
+                   margin-bottom:6px; padding:10px 14px; background:var(--panel); border:2px solid var(--acento);
+                   border-radius:12px; z-index:6; box-shadow:0 4px 14px rgba(0,0,0,.4); }
+  #vol .vol-menu input { display:block; width:120px; min-width:0; padding:0; margin:0; border:0;
+                         background:transparent; accent-color:var(--acento); cursor:pointer; }
+  #vol:hover .vol-menu, #vol:focus-within .vol-menu { display:block; }
+  #vol:hover::before { content:""; position:absolute; bottom:100%; left:-10px; right:-10px; height:8px; }
+  #mic:disabled { opacity:.35; cursor:not-allowed; }
+  @keyframes pulso { 50% { box-shadow:0 0 0 6px rgba(255,107,139,.35); } }
   button { padding:0 18px; border:0; border-radius:12px; background:var(--acento);
            color:#0d2a28; font-weight:700; cursor:pointer; }
   button:disabled { opacity:.5; cursor:wait; }
@@ -36,6 +57,23 @@
   #ajustes label { display:flex; flex-direction:column; font-size:.68rem; color:#b9b9d6; }
   #ajustes input[type=range] { width:100%; accent-color:var(--acento); }
   #ajustes .nota { font-size:.68rem; color:#b9b9d6; margin-bottom:4px; }
+
+  /* ---- Modo compañera (ventana flotante transparente de Electron) ---- */
+  html.companera, .companera body { background: transparent; overflow: hidden; }
+  .companera #escena { max-width: none; }
+  .companera #burbuja { top: 8px; bottom: auto; min-height: 0; padding: 10px 14px;
+                        font-size: .92rem; transition: opacity .35s; }
+  .companera #burbuja.oculta { opacity: 0; pointer-events: none; }
+  .companera #entrada { display: none; position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 5;
+                        width: auto; max-width: none; padding: 8px; border-radius: 14px;
+                        background: rgba(38,38,69,.92); }
+  .companera #entrada.visible { display: flex; }
+  .companera #entrada input { min-width: 0; padding: 10px 12px; font-size: .95rem; }   /* que quepan los botones */
+  #entrada #msg { min-width: 110px; }   /* nunca se encoge hasta desaparecer */
+  .companera #entrada button { padding: 0 12px; flex: 0 0 auto; }
+  .companera #herramientas { display: none; top: auto; bottom: 64px; }
+  .companera.herramientas #herramientas { display: flex; opacity: 1; }
+  .companera #ajustes { top: 60px; }
 </style>
 </head>
 <body>
@@ -54,6 +92,11 @@
   </div>
   <form id="entrada">
     <input id="msg" autocomplete="off" placeholder="Escribe algo..." autofocus>
+    <button id="mic" type="button" title="Hablar: clic para empezar, otro clic para terminar">🎤</button>
+    <span id="vol">
+      <button id="silencio" type="button" title="Clic: silenciar. Pasa el mouse para el volumen">🔊</button>
+      <span class="vol-menu"><input id="volumen" type="range" min="0" max="100" step="1" value="80" title="Volumen de la voz" aria-label="Volumen de la voz"></span>
+    </span>
     <button id="enviar">Enviar</button>
     <button id="reset" type="button" title="Borrar la conversación">Reiniciar</button>
   </form>
@@ -68,12 +111,13 @@
 //  CONFIGURACIÓN: lo que cambias cuando uses otro modelo
 //  (el nombre y la personalidad se cambian en servidor.py)
 // =====================================================================
-const MODELO_URL = "/modelo/miku.model3.json";
+const MODELO_URL = "/modelo/miku.model3.json";   // solo si el servidor no encuentra ningún .model3.json en la carpeta modelo
 const ZOOM = 1.0;            // 1 = cuerpo completo. Prueba 1.8 para ver de la cintura hacia arriba
 const DESPLAZAMIENTO_Y = 0;  // píxeles; positivo baja el modelo, negativo lo sube
 
-// Parámetros que controlan la cara. Los nombres (PARAM_...) son los del modelo Miku;
-// otro modelo puede usar otros (míralos en su archivo .cdi3.json).
+// Parámetros que controlan la cara. Los nombres "lógicos" (PARAM_...) son los del modelo Miku; cada modelo
+// los llama distinto, así que ALIAS dice qué parámetro real usar en cada uno (se elige el primero que exista).
+// Los parámetros reales de un modelo están en su archivo .cdi3.json.
 const BASE = {
   PARAM_EYE_L_SMILE: 0, PARAM_EYE_R_SMILE: 0,
   PARAM_BROW_L_Y: 0, PARAM_BROW_R_Y: 0,
@@ -81,22 +125,51 @@ const BASE = {
   PARAM_BROW_L_FORM: 0, PARAM_BROW_R_FORM: 0,
   PARAM_MOUTH_FORM: 0, PARAM_MOUTH_OPEN_Y: 0, PARAM_CHEEK: 0,
 };
-// Cada emoción solo indica lo que cambia respecto a BASE. Rango típico: -1 a 1 (0 a 1 en sonrisa y rubor).
-// Estos valores son una primera aproximación: ajústalos con el botón «ajustes».
+const ALIAS = {
+  PARAM_EYE_L_SMILE: ["ParamEyeLSmile"], PARAM_EYE_R_SMILE: ["ParamEyeRSmile"],
+  PARAM_BROW_L_Y: ["ParamBrowLY"], PARAM_BROW_R_Y: ["ParamBrowRY"],
+  PARAM_BROW_L_ANGLE: ["ParamBrowLAngle"], PARAM_BROW_R_ANGLE: ["ParamBrowRAngle"],
+  PARAM_BROW_L_FORM: ["ParamBrowLForm"], PARAM_BROW_R_FORM: ["ParamBrowRForm"],
+  PARAM_MOUTH_FORM: ["ParamMouthForm"], PARAM_MOUTH_OPEN_Y: ["ParamMouthOpenY"],
+  PARAM_CHEEK: ["ParamCheek"],
+  // Movimiento de cabeza, ojos y cuerpo (mirada y paseo)
+  PARAM_ANGLE_X: ["ParamAngleX"], PARAM_ANGLE_Y: ["ParamAngleY"], PARAM_ANGLE_Z: ["ParamAngleZ"],
+  PARAM_EYE_BALL_X: ["ParamEyeBallX"], PARAM_EYE_BALL_Y: ["ParamEyeBallY"],
+  PARAM_BODY_ANGLE_X: ["ParamBodyAngleX0", "ParamBodyAngleX"], PARAM_BODY_ANGLE_Z: ["ParamBodyAngleZ0", "ParamBodyAngleZ"],
+};
+// Controles propios de un modelo (aquí los del modelo Jian). Se escriben con su nombre real y su etiqueta para el
+// panel «ajustes»; si el modelo no los tiene, se ignoran. El rango (0 a 1, o -1 a 1) se lee del propio modelo.
+const EFECTOS = {
+  ParamSwitch1: "cara oscura", ParamSwitch2: "rubor", ParamSwitch4: "enojo",
+  ParamSwitch5: "ojos estrella", ParamSwitch6: "ojos en blanco", ParamSwitch7: "lágrimas (brillo)",
+  ParamSwitch8: "ojos corazón", ParamSwitch9: "lágrimas (caen)",
+  Ear_smile: "orejas (ánimo)", ParamCheekPuff: "mejillas infladas", ParamTongueOut: "sacar lengua",
+  AnimeAngry: "enojo anime 1", AnimeAngry2: "enojo anime 2", Anime_Cry: "llanto anime", Anime_Eye: "ojos en espiral",
+};
+// Cada emoción solo indica lo que cambia respecto a BASE (todo lo demás vuelve a 0 suavemente).
+// Valores para Jian; ajústalos con «ajustes» (abajo hay un botón para copiar lo que dejes puesto).
+// Con otro modelo, los nombres que no existan se ignoran sin dar error.
 const EMOCIONES = {
   neutral: {},
-  feliz: { PARAM_EYE_L_SMILE: 1, PARAM_EYE_R_SMILE: 1, PARAM_MOUTH_FORM: 1,
-           PARAM_BROW_L_Y: .3, PARAM_BROW_R_Y: .3, PARAM_CHEEK: .6 },
-  triste: { PARAM_MOUTH_FORM: -1, PARAM_BROW_L_Y: -.2, PARAM_BROW_R_Y: -.2,
+  feliz: { PARAM_EYE_L_SMILE: .8, PARAM_EYE_R_SMILE: .8, PARAM_MOUTH_FORM: 1,
+           PARAM_BROW_L_Y: .3, PARAM_BROW_R_Y: .3, PARAM_CHEEK: .6, Ear_smile: 1, ParamSwitch2: .35 },
+  triste: { PARAM_MOUTH_FORM: -1, PARAM_BROW_L_Y: -.3, PARAM_BROW_R_Y: -.3,
             PARAM_BROW_L_ANGLE: -.7, PARAM_BROW_R_ANGLE: -.7,
-            PARAM_BROW_L_FORM: -.5, PARAM_BROW_R_FORM: -.5 },
-  sorprendida: { PARAM_BROW_L_Y: 1, PARAM_BROW_R_Y: 1, PARAM_MOUTH_OPEN_Y: .7 },
-  enojada: { PARAM_MOUTH_FORM: -.6, PARAM_BROW_L_Y: -.6, PARAM_BROW_R_Y: -.6,
+            PARAM_BROW_L_FORM: -.6, PARAM_BROW_R_FORM: -.6, Ear_smile: -1, ParamSwitch7: 1 },
+  sorprendida: { PARAM_BROW_L_Y: 1, PARAM_BROW_R_Y: 1, PARAM_MOUTH_OPEN_Y: .6, Ear_smile: .4 },
+  enojada: { PARAM_MOUTH_FORM: -.7, PARAM_BROW_L_Y: -.5, PARAM_BROW_R_Y: -.5,
              PARAM_BROW_L_ANGLE: .8, PARAM_BROW_R_ANGLE: .8,
-             PARAM_BROW_L_FORM: -.8, PARAM_BROW_R_FORM: -.8 },
+             PARAM_BROW_L_FORM: -.8, PARAM_BROW_R_FORM: -.8, Ear_smile: -1, ParamSwitch4: 1 },
+  avergonzada: { PARAM_EYE_L_SMILE: .3, PARAM_EYE_R_SMILE: .3, PARAM_MOUTH_FORM: -.2, PARAM_BROW_L_Y: .2,
+                 PARAM_BROW_R_Y: .2, PARAM_BROW_L_FORM: -.4, PARAM_BROW_R_FORM: -.4, PARAM_CHEEK: 1,
+                 Ear_smile: -.4, ParamSwitch2: 1, ParamCheekPuff: .4 },
+  emocionada: { PARAM_EYE_L_SMILE: .4, PARAM_EYE_R_SMILE: .4, PARAM_MOUTH_FORM: 1, PARAM_MOUTH_OPEN_Y: .3,
+                PARAM_BROW_L_Y: .6, PARAM_BROW_R_Y: .6, Ear_smile: 1, ParamSwitch5: 1, ParamSwitch2: .3 },
 };
+// Segundos que dura una emoción después de terminar de hablar; luego vuelve sola a «neutral».
+const EMOCION_DURA_S = 7;
 // Animación del modelo (grupo definido en model3.json) que se reproduce con cada emoción. null = ninguna.
-const MOVIMIENTOS = { neutral: null, feliz: "Tap", triste: null, sorprendida: "Flick", enojada: "Flick" };
+const MOVIMIENTOS = { neutral: null, feliz: "Tap", triste: null, sorprendida: "Flick", enojada: "Flick", avergonzada: null, emocionada: "Tap" };
 
 // =====================================================================
 //  Modelo Live2D
@@ -107,15 +180,26 @@ const texto = document.getElementById("texto");
 let model = null, anchoBase = 1, altoBase = 1, app = null;
 let objetivo = { ...BASE };
 const actual = { ...BASE };
+let idReal = {};              // parámetro lógico -> parámetro real de este modelo (null si no lo tiene)
 let hablando = false;
+let yBase = 0;                                   // altura "de reposo" del modelo; el paseo la hace rebotar un poco
+const paseo = { activo: false, dir: 1, fuerza: 0 };   // fuerza: 0 quieta, 1 caminando (se suaviza)
+const mirada = { x: 0, y: 0, objX: 0, objY: 0 };      // hacia dónde mira (-1 a 1), enviada por la app de escritorio
 let audioActual = null, nivelBoca = 0;   // voz en reproducción y apertura de boca suavizada
 let personaje = { nombre: "Asistente", saludo: "Hola.", reinicio: "Empecemos de nuevo." };
 
+let temporizadorEmocion = null;
 function fijarEmocion(nombre) {
+  clearTimeout(temporizadorEmocion);
   objetivo = { ...BASE, ...(EMOCIONES[nombre] || {}) };
   sincronizarSliders();
   const grupo = MOVIMIENTOS[nombre];
   if (model && grupo) { try { model.motion(grupo); } catch (e) { /* sin animación */ } }
+}
+
+function luegoNeutral() {      // tras hablar, la cara vuelve sola a neutral pasados unos segundos
+  clearTimeout(temporizadorEmocion);
+  temporizadorEmocion = setTimeout(() => fijarEmocion("neutral"), EMOCION_DURA_S * 1000);
 }
 
 function colocar() {
@@ -127,6 +211,42 @@ function colocar() {
   const alto = altoBase * escala;
   model.x = W / 2;
   model.y = (H > alto ? (H - alto) / 2 : 0) + DESPLAZAMIENTO_Y;
+  yBase = model.y;
+}
+
+function resolverParametros() {
+  // Lista de parámetros que tiene el modelo cargado
+  let existentes = null;
+  try { existentes = new Set(model.internalModel.coreModel.getModel().parameters.ids); } catch (e) {}
+  const tiene = (id) => !existentes || existentes.has(id);
+  const mapa = {};
+  const ids = new Set([...Object.keys(BASE), ...Object.keys(ALIAS), ...Object.keys(EFECTOS), ...Object.values(EMOCIONES).flatMap((e) => Object.keys(e))]);
+  for (const id of ids) {
+    mapa[id] = [id, ...(ALIAS[id] || [])].find(tiene) || null;
+  }
+  console.info("Parámetros sin equivalente en este modelo:", Object.keys(mapa).filter((k) => !mapa[k]).join(", ") || "ninguno");
+  return mapa;
+}
+
+function agregarSlidersDeEfectos() {       // un control en «ajustes» por cada efecto que tenga el modelo
+  for (const id in sliders) if (idReal[id] === null) sliders[id].parentElement.style.display = "none";   // el modelo no lo tiene
+  for (const [id, nombre] of Object.entries(EFECTOS)) {
+    if (!idReal[id] || sliders[id]) continue;
+    const fila = document.createElement("label");
+    const etiqueta = document.createElement("span");
+    etiqueta.textContent = nombre;
+    const r = document.createElement("input");
+    let minimo = 0;                         // el rango (0 a 1 o -1 a 1) se lee del modelo
+    try {
+      const ps = model.internalModel.coreModel.getModel().parameters;
+      minimo = ps.minimumValues[Array.from(ps.ids).indexOf(idReal[id])] < 0 ? -1 : 0;
+    } catch (e) { /* se queda en 0 a 1 */ }
+    r.type = "range"; r.min = minimo; r.max = 1; r.step = 0.05; r.value = 0;
+    r.addEventListener("input", () => { objetivo[id] = parseFloat(r.value); });
+    sliders[id] = r;
+    fila.append(etiqueta, r);
+    panel.insertBefore(fila, botonCopiar);
+  }
 }
 
 async function cargarModelo() {
@@ -138,19 +258,25 @@ async function cargarModelo() {
     view: document.getElementById("lienzo"), resizeTo: escena, backgroundAlpha: 0,
     antialias: true, autoDensity: true, resolution: window.devicePixelRatio || 1,
   });
-  model = await PIXI.live2d.Live2DModel.from(MODELO_URL);
+  model = await PIXI.live2d.Live2DModel.from(personaje.modelo || MODELO_URL);   // el servidor indica cuál hay en la carpeta modelo
+  model.autoInteract = false;     // la mirada la controlamos nosotros (también funciona con el cursor fuera de la ventana)
   anchoBase = model.width; altoBase = model.height;
   app.stage.addChild(model);
   colocar();
   app.renderer.on("resize", colocar);
+
+  idReal = resolverParametros();
+  agregarSlidersDeEfectos();
 
   // Se ejecuta en cada fotograma, después de las animaciones y antes de dibujar:
   // aquí aplicamos la expresión (suavizada) y el movimiento de la boca al hablar.
   model.internalModel.on("beforeModelUpdate", () => {
     const core = model.internalModel.coreModel;
     const t = performance.now() / 1000;
-    for (const id in objetivo) {
-      actual[id] += (objetivo[id] - actual[id]) * 0.12;
+    for (const id of Object.keys({ ...actual, ...objetivo })) {   // lo que ya no está en la emoción vuelve a 0 suavemente
+      const real = idReal[id];
+      if (!real) continue;                                        // este modelo no tiene ese parámetro
+      actual[id] = (actual[id] || 0) + ((objetivo[id] || 0) - (actual[id] || 0)) * 0.12;
       let v = actual[id];
       if (id === "PARAM_MOUTH_OPEN_Y") {
         if (audioActual && !audioActual.paused) {      // sigue el volumen de la voz real
@@ -161,8 +287,23 @@ async function cargarModelo() {
           v = Math.max(v, habla);
         }
       }
-      core.setParameterValueById(id, v);
+      core.setParameterValueById(real, v);
     }
+
+    // Mirada (sigue al cursor) y balanceo al caminar: se SUMAN a lo que ya haya (animaciones, física)
+    mirada.x += (mirada.objX - mirada.x) * 0.1;
+    mirada.y += (mirada.objY - mirada.y) * 0.1;
+    paseo.fuerza += ((paseo.activo ? 1 : 0) - paseo.fuerza) * 0.06;
+    const fase = t * 6.4;
+    const sumar = (id, valor) => { const real = idReal[id]; if (real) core.addParameterValueById(real, valor); };
+    sumar("PARAM_ANGLE_X", mirada.x * 25);
+    sumar("PARAM_ANGLE_Y", -mirada.y * 15);
+    sumar("PARAM_EYE_BALL_X", mirada.x);
+    sumar("PARAM_EYE_BALL_Y", -mirada.y);
+    sumar("PARAM_BODY_ANGLE_X", mirada.x * 3 + paseo.dir * 3 * paseo.fuerza);
+    sumar("PARAM_ANGLE_Z", Math.sin(fase) * 5 * paseo.fuerza);
+    sumar("PARAM_BODY_ANGLE_Z", Math.sin(fase) * 4 * paseo.fuerza);
+    model.y = yBase - Math.abs(Math.sin(fase)) * 7 * paseo.fuerza;   // rebote de cada paso
   });
 }
 
@@ -212,16 +353,36 @@ botonCopiar.addEventListener("click", async () => {
 panel.appendChild(botonCopiar);
 
 function sincronizarSliders() {
-  for (const id in sliders) sliders[id].value = objetivo[id];
+  for (const id in sliders) sliders[id].value = objetivo[id] || 0;
 }
 
 // =====================================================================
 //  Chat
 // =====================================================================
-// ---------- Voz (el audio lo genera edge-tts en el servidor) ----------
+// ---------- Voz (el audio lo genera el servidor, con Piper local) ----------
 let vozActiva = true;
 try { vozActiva = localStorage.getItem("vozActiva") !== "no"; } catch (e) {}
-let ctxAudio = null, analizador = null, bufAudio = null;
+let ctxAudio = null, analizador = null, bufAudio = null, ganancia = null;
+
+// ---------- Volumen de la voz (se recuerda entre sesiones) ----------
+const barraVolumen = document.getElementById("volumen");
+const botonSilencio = document.getElementById("silencio");
+let volumen = 0.8, silenciada = false;
+try {
+  const v = parseFloat(localStorage.getItem("volumenVoz"));
+  if (v >= 0 && v <= 1) volumen = v;
+  silenciada = localStorage.getItem("vozSilenciada") === "si";
+} catch (e) {}
+function volumenActual() { return silenciada ? 0 : volumen * volumen; }   // curva cuadrática: el oído percibe mejor así
+function aplicarVolumen() {
+  barraVolumen.value = Math.round(volumen * 100);
+  botonSilencio.textContent = silenciada || volumen === 0 ? "🔇" : volumen < 0.5 ? "🔉" : "🔊";
+  if (ganancia) ganancia.gain.value = volumenActual();
+  try { localStorage.setItem("volumenVoz", String(volumen)); localStorage.setItem("vozSilenciada", silenciada ? "si" : "no"); } catch (e) {}
+}
+barraVolumen.addEventListener("input", () => { volumen = barraVolumen.value / 100; silenciada = false; aplicarVolumen(); });
+botonSilencio.addEventListener("click", () => { silenciada = !silenciada; aplicarVolumen(); });
+aplicarVolumen();
 const estado = document.getElementById("estado");
 
 const botonVoz = document.createElement("button");
@@ -242,7 +403,10 @@ function prepararAudio() {
     ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
     analizador = ctxAudio.createAnalyser();
     analizador.fftSize = 512;
-    analizador.connect(ctxAudio.destination);
+    ganancia = ctxAudio.createGain();            // el volumen va DESPUÉS del analizador: la boca se mueve igual
+    ganancia.gain.value = volumenActual();
+    analizador.connect(ganancia);
+    ganancia.connect(ctxAudio.destination);
     bufAudio = new Uint8Array(analizador.fftSize);
   }
   if (ctxAudio.state === "suspended") ctxAudio.resume();
@@ -264,7 +428,7 @@ async function cargarVoz(t) {      // pide el audio al servidor; devuelve un <au
   detenerVoz();
   if (!vozActiva) return null;
   // Sin ninguna interacción previa el navegador bloquea el audio (pasa con el saludo inicial)
-  if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return null;
+  if (!window.escritorio && navigator.userActivation && !navigator.userActivation.hasBeenActive) return null;
   try {
     const r = await fetch("/voz", { method: "POST",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ texto: t }) });
@@ -283,7 +447,8 @@ async function cargarVoz(t) {      // pide el audio al servidor; devuelve un <au
       URL.revokeObjectURL(url);
       if (audioActual === audio) audioActual = null;
     });
-    estado.textContent = "";
+    const aviso = r.headers.get("X-Voz-Aviso");     // el servidor avisa si tuvo que usar una voz de respaldo y por qué
+    estado.textContent = aviso ? "· " + decodeURIComponent(aviso) : "";
     return audio;
   } catch (e) {
     console.warn("Voz no disponible:", e);
@@ -298,9 +463,11 @@ async function reproducir(audio) {  // conecta el audio al analizador y lo inici
     ctxAudio.createMediaElementSource(audio).connect(analizador);
     audioActual = audio;
     await audio.play();
+    if (ctxAudio.state !== "running") estado.textContent = "· el audio esta bloqueado por el sistema (haz clic en la ventana)";
     return true;
   } catch (e) {
     console.warn("No pude reproducir el audio:", e);
+    estado.textContent = "· no pude reproducir la voz (" + e.message + ")";
     audioActual = null;
     return false;
   }
@@ -344,6 +511,7 @@ form.addEventListener("submit", async (ev) => {
     const d = await r.json();
     fijarEmocion(d.emocion || "neutral");
     await decir(d.texto);
+    luegoNeutral();
   } catch (e) {
     fijarEmocion("triste");
     texto.textContent = "No pude conectar con el servidor.";
@@ -359,13 +527,200 @@ document.getElementById("reset").addEventListener("click", async () => {
 });
 
 // =====================================================================
+//  Micrófono: grabar -> /oir (Whisper local en el servidor) -> se envía como mensaje
+// =====================================================================
+const botonMic = document.getElementById("mic");
+const MIC = {
+  umbral: 0.02,        // volumen mínimo (RMS, 0 a 1) para considerar que hay voz; súbelo si hay mucho ruido
+  silencioMs: 1300,    // silencio después de hablar que da por terminada la frase
+  esperaVozMs: 8000,   // si nadie habla en este tiempo, se cancela
+  maxMs: 25000,        // duración máxima de una grabación
+};
+let grabacion = null;
+
+async function empezarEscucha() {
+  if (grabacion || enviar.disabled) return;      // ya escuchando, o esperando una respuesta
+  detenerVoz(); clearInterval(temporizador); hablando = false;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    texto.textContent = "Aquí no se puede usar el micrófono."; return;
+  }
+  let flujo;
+  try {
+    flujo = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    texto.textContent = "No pude abrir el micrófono (" + (e.name === "NotAllowedError"
+      ? "sin permiso: revisa la privacidad del micrófono en Windows" : e.message) + ").";
+    return;
+  }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  const fuente = ctx.createMediaStreamSource(flujo);
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  const g = { flujo, ctx, fuente, proc, trozos: [], inicio: performance.now(),
+              hablo: false, ultimaVoz: 0, terminada: false };
+  proc.onaudioprocess = (ev) => {
+    if (g.terminada) return;
+    const datos = ev.inputBuffer.getChannelData(0);
+    g.trozos.push(new Float32Array(datos));       // copia: el navegador reutiliza el búfer
+    let suma = 0;
+    for (let i = 0; i < datos.length; i++) suma += datos[i] * datos[i];
+    const ahora = performance.now();
+    if (Math.sqrt(suma / datos.length) > MIC.umbral) { g.hablo = true; g.ultimaVoz = ahora; }
+    if (g.hablo && ahora - g.ultimaVoz > MIC.silencioMs) terminarEscucha(true);
+    else if (!g.hablo && ahora - g.inicio > MIC.esperaVozMs) terminarEscucha(true);
+    else if (ahora - g.inicio > MIC.maxMs) terminarEscucha(true);
+  };
+  fuente.connect(proc);
+  proc.connect(ctx.destination);                  // el procesador debe estar conectado para funcionar (no suena nada)
+  grabacion = g;
+  botonMic.classList.add("escuchando");
+  texto.textContent = "Te escucho...";
+}
+
+function aPCM16(trozos, tasa) {                   // Float32 -> enteros de 16 bits a 16 kHz
+  let total = 0;
+  for (const t of trozos) total += t.length;
+  const todo = new Float32Array(total);
+  let pos = 0;
+  for (const t of trozos) { todo.set(t, pos); pos += t.length; }
+  let mono = todo;
+  if (Math.abs(tasa - 16000) > 1) {               // por si el navegador no respetó los 16 kHz
+    const n = Math.floor(todo.length * 16000 / tasa);
+    mono = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = i * tasa / 16000, i0 = Math.floor(x), f = x - i0;
+      mono[i] = (todo[i0] || 0) * (1 - f) + (todo[i0 + 1] || 0) * f;
+    }
+  }
+  const salida = new Int16Array(mono.length);
+  for (let i = 0; i < mono.length; i++) salida[i] = Math.max(-1, Math.min(1, mono[i])) * 32767;
+  return salida.buffer;
+}
+
+async function terminarEscucha(enviarAudio) {     // enviarAudio = false cancela sin transcribir
+  const g = grabacion;
+  if (!g || g.terminada) return;
+  g.terminada = true; grabacion = null;
+  botonMic.classList.remove("escuchando");
+  g.proc.disconnect(); g.fuente.disconnect();
+  g.flujo.getTracks().forEach((t) => t.stop());   // apaga el micrófono
+  const tasa = g.ctx.sampleRate;
+  g.ctx.close().catch(() => {});
+  if (!enviarAudio) { texto.textContent = "Cancelado."; return; }
+  if (!g.hablo) { texto.textContent = "No te escuché. Prueba de nuevo."; return; }
+
+  texto.textContent = "Entendiendo lo que dijiste... (la primera vez puede tardar: descarga el modelo)";
+  try {
+    const r = await fetch("/oir", { method: "POST",
+      headers: { "Content-Type": "application/octet-stream" }, body: aPCM16(g.trozos, tasa) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ("error " + r.status));
+    const dicho = (d.texto || "").trim();
+    if (!dicho) { texto.textContent = "No te entendí. ¿Puedes repetirlo?"; return; }
+    msg.value = dicho;
+    form.requestSubmit();                          // se envía como cualquier mensaje escrito
+  } catch (e) {
+    fijarEmocion("triste");
+    texto.textContent = "No pude entenderte: " + e.message;
+  }
+}
+
+botonMic.addEventListener("click", () => { if (grabacion) terminarEscucha(true); else empezarEscucha(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && grabacion) terminarEscucha(false); });
+
+// =====================================================================
 //  Inicio
 // =====================================================================
+// =====================================================================
+//  Modo compañera (ventana flotante de Electron)
+// =====================================================================
+const puente = window.escritorio || null;     // lo expone preload.js; en el navegador es null
+const lienzo = document.getElementById("lienzo");
+const burbuja = document.getElementById("burbuja");
+const raiz = document.documentElement;
+let arrastre = null, ocultarBurbuja = null, ignorando = null;
+
+function mostrarBurbuja() {        // la burbuja se oculta sola unos segundos después de hablar
+  burbuja.classList.remove("oculta");
+  clearTimeout(ocultarBurbuja);
+  if (!form.classList.contains("visible")) {
+    ocultarBurbuja = setTimeout(() => burbuja.classList.add("oculta"), 8000);
+  }
+}
+function abrirChat() { form.classList.add("visible"); msg.focus(); mostrarBurbuja(); }
+function cerrarChat() { form.classList.remove("visible"); mostrarBurbuja(); }
+
+if (raiz.classList.contains("companera")) {
+  // Cualquier cambio en el texto muestra la burbuja y reinicia el temporizador
+  new MutationObserver(mostrarBurbuja).observe(texto, { childList: true, characterData: true, subtree: true });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") cerrarChat(); });
+  window.addEventListener("blur", cerrarChat);
+}
+
+if (puente) {
+  puente.alAbrirChat(abrirChat);
+  puente.alReiniciar(() => document.getElementById("reset").click());
+  puente.alAlternarHerramientas(() => raiz.classList.toggle("herramientas"));
+  puente.alEscuchar(() => { abrirChat(); empezarEscucha(); });
+  puente.alPaseo((d) => { paseo.activo = !!d.caminando; if (d.dir) paseo.dir = d.dir; });
+  puente.alMirar((d) => { mirada.objX = d.x; mirada.objY = d.y; });
+  // Avisa a la app cuando está "ocupada" (chat abierto, hablando, escuchando o con la burbuja visible): no camina
+  let avisadaOcupada = null;
+  setInterval(() => {
+    const ocupada = form.classList.contains("visible") || !burbuja.classList.contains("oculta") || hablando ||
+      !!(audioActual && !audioActual.paused) || botonMic.classList.contains("escuchando") ||
+      raiz.classList.contains("herramientas");
+    if (ocupada !== avisadaOcupada) { avisadaOcupada = ocupada; puente.ocupada(ocupada); }
+  }, 250);
+
+  // Arrastrar al personaje para mover la ventana; un toque sin mover reproduce un gesto
+  lienzo.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    arrastre = { x: e.screenX, y: e.screenY, movido: false };
+    try { lienzo.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  lienzo.addEventListener("pointermove", (e) => {
+    if (!arrastre) return;
+    const dx = e.screenX - arrastre.x, dy = e.screenY - arrastre.y;
+    if (!arrastre.movido && Math.hypot(dx, dy) < 4) return;
+    arrastre.movido = true;
+    arrastre.x = e.screenX; arrastre.y = e.screenY;
+    puente.mover(dx, dy);
+  });
+  lienzo.addEventListener("pointerup", () => {
+    if (arrastre && !arrastre.movido && model) { try { model.motion("Tap"); } catch (err) {} }
+    arrastre = null;
+  });
+  lienzo.addEventListener("dblclick", abrirChat);
+
+  // Las zonas vacías dejan pasar los clics al escritorio; sobre el personaje o los controles, no
+  document.addEventListener("mousemove", (e) => {
+    if (arrastre) return;
+    const t = e.target;
+    const sobreInterfaz = !!(t.closest && (
+      t.closest("#burbuja:not(.oculta)") || t.closest("#entrada.visible") ||
+      (raiz.classList.contains("herramientas") && t.closest("#herramientas, #ajustes"))));
+    let sobreModelo = false;
+    if (model) {
+      const b = model.getBounds();
+      const mx = b.width * 0.15, my = b.height * 0.05;   // margen: el recuadro incluye zonas vacías
+      sobreModelo = e.clientX > b.x + mx && e.clientX < b.x + b.width - mx &&
+                    e.clientY > b.y + my && e.clientY < b.y + b.height - my;
+    }
+    const ignorar = !(sobreInterfaz || sobreModelo);
+    if (ignorar !== ignorando) { ignorando = ignorar; puente.clicAtraves(ignorar); }
+  });
+}
+
 async function iniciar() {
   try {
     const r = await fetch("/info");
     personaje = { ...personaje, ...(await r.json()) };
   } catch (e) { /* se usan los valores por defecto */ }
+  if (personaje.oido === false) {
+    botonMic.disabled = true;
+    botonMic.title = "Falta instalar faster-whisper (pip install faster-whisper)";
+  }
   document.title = personaje.nombre;
   document.getElementById("nombre-texto").textContent = personaje.nombre;
   texto.textContent = "Cargando a " + personaje.nombre + "...";
@@ -376,7 +731,7 @@ async function iniciar() {
     await decir(personaje.saludo);
   } catch (e) {
     console.error(e);
-    texto.textContent = "No pude cargar el modelo (" + MODELO_URL + "): " + e.message +
+    texto.textContent = "No pude cargar el modelo (" + (personaje.modelo || MODELO_URL) + "): " + e.message +
       " Revisa que la carpeta 'modelo' tenga el contenido de 'runtime'. Aun así puedes chatear.";
   }
 }

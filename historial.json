@@ -1,82 +1,10 @@
 [
  {
   "role": "user",
-  "content": "2+ 2"
+  "content": "what 2 + 2"
  },
  {
   "role": "assistant",
-  "content": "{\"texto\":\"4.\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "cual es la capital de mexico"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"La capital de México es Ciudad de México.\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "hello"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"Hola, ¿Cómo puedo ayudarte hoy?\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "hello"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"Hola, ¿Cómo puedo ayudarte hoy?\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "hello"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"Hola, ¿Cómo puedo ayudarte hoy?\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "hello"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"Hola, ¿Cómo puedo ayudarte hoy?\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "hello"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"Hola, ¿Cómo puedo ayudarte hoy?\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "hello"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"Hola, ¿Cómo puedo ayudarte hoy?\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "puedes hablalr en ingles"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"Sure, how can I assist you today?\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "how can i get informattion about a tornado"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"To get information about a tornado, try searching online or checking weather updates.\",\"emocion\":\"neutral\"}"
+  "content": "{\"texto\":\"4\",\"emocion\":\"neutral\"}"
  }
 ]
