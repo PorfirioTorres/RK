@@ -1,0 +1,104 @@
+RYUKO - compañera de escritorio (Live2D + Ollama + voz + micrófono)
+====================================================================
+
+Necesitas en tu PC: Ollama (con el modelo:  ollama pull qwen2.5:3b), Python 3.10+ y Node.js (LTS).
+
+
+OPCIÓN A - Usarla sin compilar (sirve para probar cambios rápido)
+  1. pip install -r requirements.txt
+  2. Doble clic en  iniciar_companera.bat   (la primera vez instala Electron)
+
+OPCIÓN B - Crear Ryuko.exe
+  1. Doble clic en  construir_exe.bat   (tarda varios minutos y necesita internet)
+  2. Queda en:  release\Ryuko-win32-x64\Ryuko.exe
+     Copia esa carpeta completa donde quieras y abre Ryuko.exe. Pesa varios cientos de MB (el reconocimiento de voz y Electron son grandes).
+  3. Ollama tiene que estar abierto cuando uses la app.
+  Si el antivirus o SmartScreen avisan, es porque el .exe no está firmado: permite la ejecución.
+
+
+CÓMO SE USA
+  - Arrastra al personaje para moverlo.        - Doble clic en ella, o Ctrl+Alt+R: escribirle.
+  - Botón del micrófono, o Ctrl+Alt+M: hablarle (otro clic o un silencio de ~1 s termina la frase;
+    Escape cancela).
+  - Clic derecho en el ícono de la bandeja: menú (siempre encima, iniciar con Windows, salir...).
+  - Volumen de la voz: botón 🔊 junto al micrófono (clic = silenciar; pasa el mouse encima para el deslizador). Se recuerda entre sesiones.
+  - REACCIONES: Ryuko comenta cosas sola: se queja si pasas varios minutos sin hacerle caso (REACC.reposoMin/Max), se asusta si la
+    arrastras, a veces se queja al soltarla y se enoja si le das 4 clics seguidos. No habla en voz alta por defecto (para no gastar
+    creditos de ElevenLabs): pon REACCIONES_CON_VOZ = true en index.html si quieres voz. REACCIONES_ACTIVAS = false las apaga.
+    Las frases estan en FRASES (index.html), en ingles y espanol; se pueden cambiar o agregar.
+  - RECORDATORIOS: dile (escrito o por voz) "remind me in 20 minutes to call my mom", "remind me at 5 pm to stretch", "remind me
+    tomorrow at 9 am...", "remind me on Monday evening...", "remind me in 2 days..." o en espanol "recuerdame en 20 minutos llamar a mi
+    mama", "recuerdame manana a las 5 de la tarde...", "avisame el lunes por la manana...", "recuerdame en 3 dias...". Con un dia pero sin
+    hora avisa a las 9:00 (HORA_POR_DEFECTO en recordatorios.py). Tambien: "what reminders do I have?" (lista), "cancel the reminder
+    about the report" / "cancela el recordatorio de la junta" (borra uno), "cancel the last reminder" (el ultimo) y "cancel all my
+    reminders" (todos). Lo entiende el programa con reglas (no el modelo), asi que es exacto. Se guardan en
+    %APPDATA%\Ryuko\recordatorios.json y sobreviven si cierras Ryuko; si ya paso la hora al abrirla, avisa disculpandose.
+    A la hora lo dice con voz. Si estas escribiendo o ella esta hablando, espera su turno. Reglas en recordatorios.py.
+  - UTILIDADES: "what time is it?" / "que hora es?" y "what's the date today?" / "que dia es hoy?" (las dice exactas desde la PC).
+    Temporizador: "set a timer for 25 minutes" / "ponme un temporizador de media hora"; "how much time is left?"; "cancel the timer".
+    Pomodoro: "start a pomodoro" / "inicia un pomodoro" = 25 min de concentracion y luego avisa y arranca solo un descanso de 5
+    (POMODORO_MIN y DESCANSO_MIN en utilidades.py). Cronometro: "start the stopwatch", "how long has the stopwatch been running?",
+    "stop the stopwatch". Los temporizadores no se mezclan con los recordatorios ("cancel all reminders" no los borra).
+  - MEMORIA: Ryuko recuerda datos tuyos entre sesiones. Dile "my name is Juan" / "me llamo Juan", "remember that I study software
+    engineering" / "recuerda que mi gato se llama Michi". Preguntale "what do you remember about me?" / "que sabes de mi?". Para borrar:
+    "forget that I study software engineering" / "olvida lo de mi gato", o "forget everything" / "olvida todo". Se guarda en
+    %APPDATA%\Ryuko\memoria.json (puedes abrirlo y editarlo a mano; cada linea es una frase). Lo que sabe se agrega a su personalidad, asi
+    que lo usa al platicar. Reiniciar la conversacion NO borra la memoria. Resumen automatico con el modelo: MEMORIA_AUTOMATICA en
+    servidor.py (apagado por defecto; el modelo de 3B puede anotar cosas dudosas, revisa con "what do you remember about me?").
+  - IDIOMA: Ryuko habla, escucha y piensa en INGLES (IDIOMA = "en" arriba de servidor.py; "es" vuelve al espanol). Cambia solo la
+    voz de Piper (en_US-amy-medium, se descarga la primera vez), el micrófono (Whisper), la voz de Windows de respaldo, el idioma de
+    ElevenLabs, el saludo y la personalidad. Si ya habias platicado en espanol, pulsa Reiniciar una vez para que no mezcle idiomas.
+    La interfaz (botones, avisos y menu de la bandeja) tambien cambia de idioma con IDIOMA.
+  - EMOCIONES (7): neutral, feliz, triste, sorprendida, enojada, avergonzada, emocionada. Tras hablar, la cara vuelve sola a neutral (EMOCION_DURA_S).
+    Para afinarlas: clic derecho en la bandeja > "Ajustar expresiones" -> pulsa una emocion -> "ajustes" -> mueve los
+    deslizadores (incluye rubor, lagrimas, ojos estrella/corazon, orejas, etc. de Jian) -> "copiar valores" y pegalos en EMOCIONES (index.html).
+  - CAMINAR: cuando no la molestas (sin burbuja, sin chat abierto, sin mouse encima) pasea sola por el suelo de la pantalla
+    y te mira siguiendo el cursor. Se detiene al hablarle o abrir el chat. Si la sueltas en el aire, cae al suelo.
+    Bandeja > "Caminar por la pantalla" la activa/desactiva; Ctrl+Alt+Q = quedarse quieta/seguir. No tiene animacion de pasos:
+    es balanceo y rebote del cuerpo. Pendiente de probar en Windows (monitores multiples, apps a pantalla completa).
+  - VOZ (cambio de la v7): ya no usa el servicio online de Microsoft (edge-tts), que dejó de funcionar.
+    Ahora la voz se genera en tu PC con Piper. La primera vez que Ryuko hable se descarga la voz
+    (unos 110 MB) a  %APPDATA%\Ryuko\voces  y después funciona sin internet.
+    Si Piper fallara, usa una voz de Windows en español como respaldo.
+    Para cambiar de voz: edita VOZ_PIPER en servidor.py (por ejemplo es_MX-ald-medium, es_AR-daniela-high,
+    es_ES-davefx-medium). Escúchalas en https://rhasspy.github.io/piper-samples/
+  - VOZ CON ELEVENLABS (opcional, de pago por uso): crea una API key en elevenlabs.io (Developers > API Keys) y pégala
+    sola, en la primera línea, en un archivo  elevenlabs.txt  dentro de  %APPDATA%\Ryuko\  (en desarrollo: junto a servidor.py).
+    Sin ese archivo se usa Piper. Si ElevenLabs falla (sin créditos, sin internet, clave mala) usa Piper solo y
+    reintenta a los 1-10 minutos. Las frases cortas repetidas (como el saludo) se guardan en  cache_voz\  para no gastar créditos.
+    La voz se elige con ELEVENLABS_VOZ en servidor.py (copia el ID de la voz desde elevenlabs.io > Voces).
+    OJO: las voces de la Biblioteca de voces de ElevenLabs (las de enlaces elevenlabs.io/voices/...) normalmente NO se pueden
+    usar por API con el plan gratis. Usa una voz predeterminada o una tuya (Mis voces). Si ElevenLabs falla, junto al nombre
+    de Ryuko aparece el motivo ("voz de respaldo (piper). ...") y habla con Piper.
+    La clave NO va dentro del .exe ni en el zip: no la compartas.
+  - La primera vez que uses el micrófono se descarga el modelo de reconocimiento (unos 460 MB).
+    Se guarda en  %APPDATA%\Ryuko\whisper  y después funciona sin internet.
+  - El historial de la charla está en  %APPDATA%\Ryuko\historial.json
+  - Si Windows no deja usar el micrófono: Configuración > Privacidad y seguridad > Micrófono >
+    permitir que las aplicaciones de escritorio accedan.
+
+
+QUÉ CAMBIAR Y DÓNDE
+  - Nombre, personalidad, voz, idioma del micrófono, modelo de Ollama: arriba de servidor.py.
+    En la app compilada esto va dentro del servidor, así que hay que volver a ejecutar
+    construir_exe.bat. Para probar cambios rápido, usa la opción A.
+  - Cambiar el modelo Live2D:
+      * Opción A: reemplaza el contenido de la carpeta  modelo\
+      * App compilada: reemplaza el contenido de  resources\modelo\  (junto a Ryuko.exe)
+    Para usar el modelo Jian (u otro con nombres raros): descomprime su .rar y ejecuta, en esta carpeta,
+        python preparar_modelo.py "C:\ruta\a\la\carpeta\del\modelo" jian
+    Eso lo copia a modelo\ con nombres sin caracteres chinos (el modelo Miku actual pasa a modelo_anterior\).
+    Luego construir_exe.bat, o la opción A para probar. Jian está en formato Cubism 5 y su textura es de 8192 px
+    (usa más memoria de video que Miku).
+    Cada modelo llama distinto a sus parámetros (boca, cejas...). La tabla ALIAS de index.html dice a cuál
+    equivale cada uno, y EFECTOS lista los efectos propios de Jian (rubor, lágrimas, enojo...).
+    Se detecta solo el archivo .model3.json que haya dentro. Si el modelo nuevo usa otros nombres
+    de parámetros (PARAM_...), ajusta BASE y EMOCIONES en index.html (en la app compilada está en
+    resources\servidor\_internal\index.html) y reinicia la app. Con el botón «ajustes» (menú de la
+    bandeja > Ajustar expresiones) ves los cambios en vivo.
+
+
+SI ALGO FALLA
+  - Fondo negro en lugar de transparente:  set HANA_SIN_GPU=1  antes de iniciar.
+  - Ver errores de la página:              set HANA_DEBUG=1   antes de iniciar.
+  - Usar un Python concreto (opción A):    set HANA_PYTHON=C:\ruta\python.exe

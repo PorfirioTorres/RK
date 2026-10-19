@@ -1,0 +1,16 @@
+{
+  "apps": {
+    "browser": "chrome.exe",
+    "notepad": "notepad.exe",
+    "calculator": "calc.exe"
+  },
+  "folders": {
+    "downloads": "C:\\Users\\juan\\Downloads",
+    "documents": "C:\\Users\\juan\\Documents"
+  },
+  "sites": {
+    "google": "https://www.google.com",
+    "youtube": "https://www.youtube.com",
+    "github": "https://www.github.com"
+  }
+}

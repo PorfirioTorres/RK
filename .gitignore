@@ -1,0 +1,35 @@
+# Cache de Python
+__pycache__/
+*.pyc
+
+# Carpetas de compilacion (PyInstaller y empaquetadores)
+build/
+dist/
+release/
+*.spec
+
+# Dependencias de JavaScript (Node.js)
+node_modules/
+
+# Modelos locales o respaldos pesados
+modelo/
+modelo_anterior/
+
+# Excluir modelos pesados de Inteligencia Artificial
+whisper/
+voces/
+
+# Datos persistentes del usuario (JSONs de memoria, notas, etc.)
+historial.json
+memoria.json
+notas.json
+recordatorios.json
+cronometro.json
+
+# Archivos de configuración sensible
+elevenlabs.txt
+settings.json
+settings.local.json
+
+# Archivo de fases
+PLAN_FASES.md

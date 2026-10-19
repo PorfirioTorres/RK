@@ -1,42 +1,10 @@
 [
  {
   "role": "user",
-  "content": "2+ 2"
+  "content": "what 2 + 2"
  },
  {
   "role": "assistant",
-  "content": "{\"texto\":\"4, nada más y nada menos.\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "6441+41"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"4102.\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "cual es la capital de mexico"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"La capital de México es Ciudad de México.\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "que es pi"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"Es un nombre propio.\",\"emocion\":\"neutral\"}"
- },
- {
-  "role": "user",
-  "content": "3.1416 que significa"
- },
- {
-  "role": "assistant",
-  "content": "{\"texto\":\"Es una aproximación del número pi (π).\",\"emocion\":\"neutral\"}"
+  "content": "{\"texto\":\"4\",\"emocion\":\"neutral\"}"
  }
 ]
