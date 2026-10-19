@@ -64,6 +64,21 @@ except ImportError:  # el chat funciona igual, solo sin micrófono
     np = None
     WhisperModel = None
 
+import memoria
+import recordatorios
+import notas
+import calculadora
+import concentracion
+import utilidades
+import control_apps
+import control_musica
+import portapapeles
+import clima
+import ventana_activa
+import gestos
+import ajustes
+from datetime import datetime, timedelta
+
 # ---------- Idioma ----------
 # "en" = Ryuko habla, escucha y piensa en inglés (voz, micrófono y personalidad). "es" = español.
 # Cambia solo esta línea; todo lo demás (voz, oído, saludo, personalidad) se ajusta solo.
@@ -140,6 +155,11 @@ OIDO_IDIOMA = _T["oido"]  # "en" para inglés; None = detectarlo solo (menos pre
 OIDO_PRECARGAR = True    # cargar el modelo al arrancar, para que el primer uso del micrófono sea rápido
 
 MODELO = "qwen2.5:3b"
+# Memoria de largo plazo (memoria.json). Con las órdenes «remember that...» / «recuerda que...» siempre funciona.
+# El resumen automático lo hace el modelo pequeño cada cierto número de mensajes y puede anotar cosas dudosas:
+# empieza apagado; actívalo si quieres probarlo (revisa lo que anota con «what do you remember about me?»).
+MEMORIA_AUTOMATICA = False
+MEMORIA_CADA = 6          # cada cuántos mensajes tuyos intenta resumir
 MAX_MENSAJES = 20  # mensajes de conversación que se recuerdan (sin contar la personalidad)
 
 # ---------- Rutas de archivos ----------
@@ -415,7 +435,16 @@ async def ciclo_de_vida(_app):
 
 app = FastAPI(lifespan=ciclo_de_vida)
 # La personalidad se vuelve a leer del código en cada arranque; solo la charla se guarda.
+MEMORIA = memoria.Memoria(DATOS / "memoria.json")
 historial: list[dict] = [{"role": "system", "content": PERSONALIDAD}] + cargar_historial()[-MAX_MENSAJES:]
+
+
+def actualizar_personalidad() -> None:
+    """La personalidad + lo que Ryuko recuerda de ti. Se vuelve a armar cada vez que cambia la memoria."""
+    historial[0]["content"] = PERSONALIDAD + MEMORIA.bloque_para_personalidad(IDIOMA)
+
+
+actualizar_personalidad()
 
 
 def buscar_modelo():
@@ -428,7 +457,7 @@ def buscar_modelo():
 
 @app.get("/info")
 def info():
-    return {"nombre": NOMBRE, "saludo": SALUDO, "reinicio": SALUDO_REINICIO,
+    return {"nombre": NOMBRE, "saludo": SALUDO, "idioma": IDIOMA, "reinicio": SALUDO_REINICIO,
             "oido": WhisperModel is not None, "modelo": buscar_modelo()}
 
 
@@ -448,8 +477,289 @@ def pedir_al_modelo(mensajes: list[dict], con_formato: bool) -> Respuesta:
         return Respuesta(texto=contenido.strip() or "...", emocion="neutral")
 
 
+ALMACEN_RECORDATORIOS = recordatorios.Almacen(DATOS / "recordatorios.json")
+CRONOMETRO = utilidades.Cronometro(DATOS / "cronometro.json")
+ALMACEN_NOTAS = notas.Almacen(DATOS / "notas.json")
+PERMITIDOS_APPS = control_apps.cargar_permitidos(DATOS / "apps_permitidas.json")
+
+
+def responder_directo(texto: str):
+    """Recordatorios, notas, calculadora y memoria se resuelven con reglas (sin el modelo, para que sean exactos). None = charla normal."""
+    ahora = datetime.now()
+
+    # 1. Recordatorios
+    r = recordatorios.interpretar(texto, ahora)
+    if r is not None:
+        if r["tipo"] == "crear":
+            ALMACEN_RECORDATORIOS.agregar(r["cuando"], r["asunto"])
+            salida = Respuesta(texto=recordatorios.texto_confirmacion(r, ahora, IDIOMA), emocion="neutral")
+        elif r["tipo"] == "listar":
+            salida = Respuesta(texto=recordatorios.texto_lista(ALMACEN_RECORDATORIOS.listar(), IDIOMA), emocion="neutral")
+        elif r["tipo"] == "cancelar_uno":
+            salida = Respuesta(texto=recordatorios.texto_cancelado_uno(
+                ALMACEN_RECORDATORIOS.cancelar_uno(r["consulta"], r["ultimo"]), IDIOMA), emocion="neutral")
+        elif r["tipo"] == "cancelar":
+            salida = Respuesta(texto=recordatorios.texto_cancelado(ALMACEN_RECORDATORIOS.cancelar_todos(), IDIOMA), emocion="neutral")
+        else:
+            salida = Respuesta(texto=recordatorios.texto_sin_hora(IDIOMA), emocion="sorprendida")
+        return registrar_directo(texto, salida)
+
+    # 2. Notas
+    n = notas.interpretar(texto)
+    if n is not None:
+        if n["tipo"] == "agregar":
+            nuevo = ALMACEN_NOTAS.agregar(n["hecho"])
+            salida = Respuesta(texto=notas.texto_agregado(n["hecho"], IDIOMA, nuevo), emocion="neutral")
+        elif n["tipo"] == "listar":
+            salida = Respuesta(texto=notas.texto_lista(ALMACEN_NOTAS.listar(), IDIOMA), emocion="neutral")
+        elif n["tipo"] == "borrar":
+            borrados = ALMACEN_NOTAS.borrar(n["consulta"])
+            salida = Respuesta(texto=notas.texto_borrado(borrados, IDIOMA), emocion="neutral")
+        return registrar_directo(texto, salida)
+
+    # 3. Calculadora
+    c = calculadora.interpretar(texto)
+    if c is not None:
+        res = None
+        if c["tipo"] == "calc":
+            res = calculadora.resolver_calc(c["expr"])
+        elif c["tipo"] == "conv":
+            res = calculadora.resolver_conv(c["valor"], c["de"], c["a"])
+
+        if res:
+            salida = Respuesta(texto=calculadora.texto_resultado(c["tipo"], res, texto, IDIOMA), emocion="neutral")
+            return registrar_directo(texto, salida)
+
+    # 4. Control de Apps y Sitios
+    a = control_apps.interpretar(texto)
+    if a is not None:
+        exito = control_apps.abrir_recurso(a["recurso"], PERMITIDOS_APPS)
+        salida = Respuesta(texto=control_apps.texto_resultado(exito, a["recurso"], IDIOMA), emocion="neutral")
+        return registrar_directo(texto, salida)
+
+    # 5. Control de Música
+    m = control_musica.interpretar(texto)
+    if m is not None:
+        exito = control_musica.ejecutar_accion(m["accion"])
+        salida = Respuesta(texto=control_musica.texto_resultado(m["accion"], exito, IDIOMA), emocion="neutral")
+        return registrar_directo(texto, salida)
+
+    # 6. Portapapeles
+    p = portapapeles.interpretar(texto)
+    if p is not None:
+        contenido = portapapeles.obtener_texto_copiado()
+        if not contenido:
+            salida = Respuesta(
+                texto="Your clipboard is empty." if IDIOMA == "en" else "Tu portapapeles está vacío.",
+                emocion="sorprendida"
+            )
+            return registrar_directo(texto, salida)
+
+        texto = f"{texto}\n\n[Clipboard content]:\n{contenido}"
+
+    # 7. Clima
+    cl = clima.interpretar(texto)
+    if cl is not None:
+        # Usamos coordenadas genéricas o podríamos intentar obtener la IP del usuario.
+        # Para este ejemplo, usamos Madrid (40.41, -3.70) como default.
+        info_clima = clima.obtener_clima(40.4167, -3.7038, IDIOMA)
+        if info_clima:
+            salida = Respuesta(texto=info_clima, emocion="neutral")
+            return registrar_directo(texto, salida)
+
+    # 8. Gestos
+    g = gestos.interpretar_gesto(texto)
+    if g is not None:
+        salida = Respuesta(texto=f"Tch... fine." if IDIOMA == "en" else "Tch... está bien.", emocion="neutral")
+        res_dict = salida.model_dump()
+        res_dict["gesto"] = g
+        return registrar_directo(texto, Respuesta(**res_dict))
+
+    # 9. Utilidades (Hora, Fecha, Timers)
+    u = utilidades.interpretar(texto, ahora)
+    if u is not None:
+        return responder_utilidad(texto, u, ahora)
+
+    # 9. Memoria
+    return responder_memoria(texto)
+
+
+def responder_utilidad(texto: str, u: dict, ahora: datetime):
+    """Hora, fecha, temporizadores (con Pomodoro) y cronómetro."""
+    tipo, txt = u["tipo"], ""
+    if tipo == "hora":
+        txt = utilidades.texto_hora(ahora, IDIOMA)
+    elif tipo == "fecha":
+        txt = utilidades.texto_fecha(ahora, IDIOMA)
+    elif tipo == "timer":
+        clase = u["clase"]
+        ALMACEN_RECORDATORIOS.agregar(ahora + timedelta(seconds=u["segundos"]), "", tipo=clase, duracion=u["segundos"])
+        txt = utilidades.texto_timer_creado(u, IDIOMA)
+    elif tipo == "cancelar_timer":
+        txt = utilidades.texto_timer_cancelado(ALMACEN_RECORDATORIOS.cancelar_temporizadores(), IDIOMA)
+    elif tipo == "consultar_timer":
+        txt = utilidades.texto_timer_restante(ALMACEN_RECORDATORIOS.listar(), time.time(), IDIOMA)
+    elif tipo == "cron_iniciar":
+        txt = utilidades.texto_cron("iniciar", CRONOMETRO.iniciar(), IDIOMA)
+    elif tipo == "cron_parar":
+        txt = utilidades.texto_cron("parar", CRONOMETRO.parar(), IDIOMA)
+    else:
+        txt = utilidades.texto_cron("ver", CRONOMETRO.transcurrido(), IDIOMA)
+    return registrar_directo(texto, Respuesta(texto=txt, emocion="neutral"))
+
+
+def registrar_directo(texto: str, salida):
+    historial.append({"role": "user", "content": texto})
+    historial.append({"role": "assistant", "content": salida.model_dump_json()})
+    if len(historial) > MAX_MENSAJES + 1:
+        del historial[1:len(historial) - MAX_MENSAJES]
+    guardar_historial()
+    return salida
+
+
+def responder_memoria(texto: str):
+    r = memoria.interpretar(texto)
+    if r is None:
+        return None
+    if r["tipo"] == "recordar":
+        nuevo = MEMORIA.agregar(r["hecho"], r.get("clave"))
+        txt = memoria.texto_recordado(r["hecho"], IDIOMA, nuevo)
+    elif r["tipo"] == "olvidar":
+        txt = memoria.texto_olvidado(MEMORIA.olvidar(r["consulta"]), IDIOMA)
+    elif r["tipo"] == "olvidar_todo":
+        txt = memoria.texto_vaciado(MEMORIA.vaciar(), IDIOMA)
+    else:
+        txt = memoria.texto_lista(MEMORIA.listar(), IDIOMA)
+    actualizar_personalidad()
+    return registrar_directo(texto, Respuesta(texto=txt, emocion="neutral"))
+
+
+@app.get("/estado/ventana")
+def estado_ventana():
+    """Informa qué ventana está activa y si Ryuko tiene un comentario al respecto."""
+    titulo = ventana_activa.obtener_ventana_activa()
+    comentario = ventana_activa.obtener_comentario_app(titulo, IDIOMA)
+    return {
+        "titulo": titulo,
+        "comentario": comentario
+    }
+
+@app.get("/estado/concentracion")
+def estado_concentracion():
+    """La página lo consulta para saber si debe apagar el paseo o la voz."""
+    return {"pantalla_completa": concentracion.detectar_pantalla_completa()}
+
+@app.get("/estado/humor")
+def estado_humor():
+    """Informa el ánimo de Ryuko según la hora."""
+    return {
+        "dormida": concentracion.es_hora_dormir(),
+        "animada": concentracion.es_hora_animada(),
+        "comentario": concentracion.obtener_comentario_horario(IDIOMA)
+    }
+
+
+
+_mensajes_desde_resumen = 0
+
+
+def resumir_en_memoria() -> None:
+    """Pide al modelo que anote datos duraderos del usuario (solo si MEMORIA_AUTOMATICA); corre en segundo plano."""
+    try:
+        dichos = [m["content"] for m in historial if m["role"] == "user"][-MEMORIA_CADA:]
+        if not dichos:
+            return
+        esquema = {"type": "object", "properties": {"hechos": {"type": "array", "items": {"type": "string"}}},
+                   "required": ["hechos"]}
+        r = ollama.chat(model=MODELO, format=esquema, options={"temperature": 0.2, "num_predict": 200},
+                        messages=[{"role": "system", "content": memoria.PROMPT_EXTRACCION[IDIOMA]},
+                                  {"role": "user", "content": "\n".join("- " + d for d in dichos)}])
+        hechos = json.loads(r.message.content).get("hechos", [])
+        nuevos = memoria.filtrar_automaticos(hechos, MEMORIA.listar())
+        if any([MEMORIA.agregar(h, auto=True) for h in nuevos]):
+            actualizar_personalidad()
+    except Exception as e:
+        print(f"No pude actualizar la memoria: {e}", file=sys.stderr)
+
+
+@app.get("/recordatorios/vencido")
+def recordatorio_vencido():
+    """La página lo consulta cada pocos segundos: si ya llegó la hora de alguno, lo entrega (una sola vez)."""
+    d = ALMACEN_RECORDATORIOS.sacar_vencido()
+    if d is None:
+        return {"texto": None}
+    if d.get("tipo") == "pomodoro":          # al terminar un Pomodoro empieza solo el descanso
+        segundos = utilidades.DESCANSO_MIN * 60
+        ALMACEN_RECORDATORIOS.agregar(datetime.now() + timedelta(seconds=segundos), "", tipo="descanso", duracion=segundos)
+
+    return {
+        "texto": recordatorios.texto_aviso(d, time.time(), IDIOMA),
+        "sonido": "aviso"  # Señal para que el frontend reproduzca el sonido de notificación
+    }
+
+
+@app.get("/ajustes")
+def obtener_ajustes():
+    """Devuelve la configuración actual."""
+    return ajustes.cargar_ajustes(DATOS / "settings.json")
+
+@app.post("/ajustes")
+def actualizar_ajustes(nuevos_ajustes: dict):
+    """Actualiza la configuración del sistema."""
+    exito = ajustes.guardar_ajustes(DATOS / "settings.json", nuevos_ajustes)
+    if exito:
+        return {"ok": True}
+    raise HTTPException(500, "No se pudieron guardar los ajustes")
+
+@app.post("/respaldo")
+def hacer_respaldo():
+    """Crea una copia de seguridad de los datos del usuario."""
+    # Guardamos los respaldos en una carpeta 'backups' dentro de DATOS
+    carpeta_respaldos = DATOS / "backups"
+    archivos = ajustes.crear_respaldo(DATOS, carpeta_respaldos)
+    if archivos:
+        return {"ok": True, "respaldados": archivos}
+    raise HTTPException(500, "Falló la creación del respaldo")
+
+@app.get("/inicio/saludo")
+def saludo_inicio():
+    """Genera el saludo inicial con fecha y recordatorios pendientes."""
+    ahora = datetime.now()
+    fecha_txt = utilidades.texto_fecha(ahora, IDIOMA)
+
+    pendientes = ALMACEN_RECORDATORIOS.listar()
+    # Filtrar solo los que aún no han vencido
+    futuros = [r for r in pendientes if r["cuando"] > ahora]
+
+    if futuros:
+        # Tomamos el más cercano
+        proximo = min(futuros, key=lambda x: x["cuando"])
+        # Formateamos la hora del recordatorio
+        hora_rec = proximo["cuando"].strftime("%H:%M" if IDIOMA == "es" else "%I:%M %p")
+        asunto = proximo["asunto"] or ("timer" if proximo.get("tipo") == "timer" else "reminder")
+
+        if IDIOMA == "en":
+            detalle = f"Today is {fecha_txt}. You have a reminder for {asunto} at {hora_rec}."
+        else:
+            detalle = f"Hoy es {fecha_txt}. Tienes un recordatorio de {asunto} a las {hora_rec}."
+    else:
+        detalle = f"Today is {fecha_txt}." if IDIOMA == "en" else f"Hoy es {fecha_txt}."
+
+    # Pedimos al modelo que convierta esto en un saludo con la personalidad de Ryuko
+    prompt = f"System: {PERSONALIDAD}\nUser: {detalle}. Greet the user based on this info."
+
+    # Usamos una llamada simplificada al modelo
+    try:
+        res = pedir_al_modelo([{"role": "user", "content": prompt}], True)
+        return res
+    except Exception:
+        return Respuesta(texto=detalle, emocion="neutral")
+
 @app.post("/chat")
 def chat(mensaje: Mensaje):
+    directa = responder_directo(mensaje.texto)
+    if directa is not None:
+        return directa
     historial.append({"role": "user", "content": mensaje.texto})
     # Intentos, del más completo al más simple. Si el modelo se atora con la charla larga, reintenta con
     # menos contexto y, al final, sin forzar el formato JSON.
@@ -467,13 +777,19 @@ def chat(mensaje: Mensaje):
             error = e
     if salida is None:
         historial.pop()  # no guardar el mensaje si falló
-        return {"texto": f"No pude hablar con el modelo (¿está Ollama abierto?): {error}",
+        return {"texto": (f"I couldn't reach the language model (is Ollama running?): {error}" if IDIOMA == "en"
+                          else f"No pude hablar con el modelo (¿está Ollama abierto?): {error}"),
                 "emocion": "triste"}
 
     historial.append({"role": "assistant", "content": salida.model_dump_json()})
     if len(historial) > MAX_MENSAJES + 1:
         del historial[1:len(historial) - MAX_MENSAJES]
     guardar_historial()
+    global _mensajes_desde_resumen
+    _mensajes_desde_resumen += 1
+    if MEMORIA_AUTOMATICA and _mensajes_desde_resumen >= MEMORIA_CADA:
+        _mensajes_desde_resumen = 0
+        threading.Thread(target=resumir_en_memoria, daemon=True).start()
     return salida
 
 

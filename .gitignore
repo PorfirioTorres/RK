@@ -11,7 +11,7 @@ release/
 # Dependencias de JavaScript (Node.js)
 node_modules/
 
-# Modelos locales o respaldos pesados 
+# Modelos locales o respaldos pesados
 modelo/
 modelo_anterior/
 
@@ -19,6 +19,17 @@ modelo_anterior/
 whisper/
 voces/
 
+# Datos persistentes del usuario (JSONs de memoria, notas, etc.)
+historial.json
+memoria.json
+notas.json
+recordatorios.json
+cronometro.json
 
-# Si "modelo_anterior" es un respaldo muy pesado que no necesitas en la nube, descomenta la siguiente linea quitando el #:
-# modelo_anterior/
+# Archivos de configuración sensible
+elevenlabs.txt
+settings.json
+settings.local.json
+
+# Archivo de fases
+PLAN_FASES.md

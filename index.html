@@ -186,7 +186,8 @@ let yBase = 0;                                   // altura "de reposo" del model
 const paseo = { activo: false, dir: 1, fuerza: 0 };   // fuerza: 0 quieta, 1 caminando (se suaviza)
 const mirada = { x: 0, y: 0, objX: 0, objY: 0 };      // hacia dónde mira (-1 a 1), enviada por la app de escritorio
 let audioActual = null, nivelBoca = 0;   // voz en reproducción y apertura de boca suavizada
-let personaje = { nombre: "Asistente", saludo: "Hola.", reinicio: "Empecemos de nuevo." };
+let personaje = { nombre: "Asistente", saludo: "Hola.", reinicio: "Empecemos de nuevo.", idioma: "es" };
+const L = (es, en) => (personaje.idioma === "en" ? en : es);       // textos de la interfaz según IDIOMA del servidor
 
 let temporizadorEmocion = null;
 function fijarEmocion(nombre) {
@@ -346,9 +347,9 @@ botonCopiar.addEventListener("click", async () => {
     if (Math.abs(objetivo[id]) > 0.001) salida[id] = Math.round(objetivo[id] * 100) / 100;
   }
   const t = JSON.stringify(salida);
-  try { await navigator.clipboard.writeText(t); botonCopiar.textContent = "¡copiado!"; }
-  catch (e) { window.prompt("Copia estos valores:", t); }
-  setTimeout(() => { botonCopiar.textContent = "copiar valores"; }, 1500);
+  try { await navigator.clipboard.writeText(t); botonCopiar.textContent = L("¡copiado!", "copied!"); }
+  catch (e) { window.prompt(L("Copia estos valores:", "Copy these values:"), t); }
+  setTimeout(() => { botonCopiar.textContent = L("copiar valores", "copy values"); }, 1500);
 });
 panel.appendChild(botonCopiar);
 
@@ -387,7 +388,7 @@ const estado = document.getElementById("estado");
 
 const botonVoz = document.createElement("button");
 botonVoz.type = "button";
-function pintarBotonVoz() { botonVoz.textContent = "voz: " + (vozActiva ? "sí" : "no"); }
+function pintarBotonVoz() { botonVoz.textContent = L("voz: ", "voice: ") + (vozActiva ? L("sí", "on") : L("no", "off")); }
 botonVoz.addEventListener("click", () => {
   vozActiva = !vozActiva;
   try { localStorage.setItem("vozActiva", vozActiva ? "si" : "no"); } catch (e) {}
@@ -452,7 +453,7 @@ async function cargarVoz(t) {      // pide el audio al servidor; devuelve un <au
     return audio;
   } catch (e) {
     console.warn("Voz no disponible:", e);
-    estado.textContent = "· sin voz (" + e.message + ")";
+    estado.textContent = L("· sin voz (", "· no voice (") + e.message + ")";
     return null;
   }
 }
@@ -463,11 +464,11 @@ async function reproducir(audio) {  // conecta el audio al analizador y lo inici
     ctxAudio.createMediaElementSource(audio).connect(analizador);
     audioActual = audio;
     await audio.play();
-    if (ctxAudio.state !== "running") estado.textContent = "· el audio esta bloqueado por el sistema (haz clic en la ventana)";
+    if (ctxAudio.state !== "running") estado.textContent = L("· el audio esta bloqueado por el sistema (haz clic en la ventana)", "· audio is blocked by the system (click the window)");
     return true;
   } catch (e) {
     console.warn("No pude reproducir el audio:", e);
-    estado.textContent = "· no pude reproducir la voz (" + e.message + ")";
+    estado.textContent = L("· no pude reproducir la voz (", "· could not play the voice (") + e.message + ")";
     audioActual = null;
     return false;
   }
@@ -514,7 +515,7 @@ form.addEventListener("submit", async (ev) => {
     luegoNeutral();
   } catch (e) {
     fijarEmocion("triste");
-    texto.textContent = "No pude conectar con el servidor.";
+    texto.textContent = L("No pude conectar con el servidor.", "I couldn't reach the server.");
   }
   enviar.disabled = false;
   msg.focus();
@@ -542,15 +543,15 @@ async function empezarEscucha() {
   if (grabacion || enviar.disabled) return;      // ya escuchando, o esperando una respuesta
   detenerVoz(); clearInterval(temporizador); hablando = false;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    texto.textContent = "Aquí no se puede usar el micrófono."; return;
+    texto.textContent = L("Aquí no se puede usar el micrófono.", "The microphone can't be used here."); return;
   }
   let flujo;
   try {
     flujo = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
   } catch (e) {
-    texto.textContent = "No pude abrir el micrófono (" + (e.name === "NotAllowedError"
-      ? "sin permiso: revisa la privacidad del micrófono en Windows" : e.message) + ").";
+    texto.textContent = L("No pude abrir el micrófono (", "I couldn't open the microphone (") + (e.name === "NotAllowedError"
+      ? L("sin permiso: revisa la privacidad del micrófono en Windows", "no permission: check the microphone privacy settings in Windows") : e.message) + ").";
     return;
   }
   const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
@@ -574,7 +575,7 @@ async function empezarEscucha() {
   proc.connect(ctx.destination);                  // el procesador debe estar conectado para funcionar (no suena nada)
   grabacion = g;
   botonMic.classList.add("escuchando");
-  texto.textContent = "Te escucho...";
+  texto.textContent = L("Te escucho...", "I'm listening...");
 }
 
 function aPCM16(trozos, tasa) {                   // Float32 -> enteros de 16 bits a 16 kHz
@@ -606,22 +607,22 @@ async function terminarEscucha(enviarAudio) {     // enviarAudio = false cancela
   g.flujo.getTracks().forEach((t) => t.stop());   // apaga el micrófono
   const tasa = g.ctx.sampleRate;
   g.ctx.close().catch(() => {});
-  if (!enviarAudio) { texto.textContent = "Cancelado."; return; }
-  if (!g.hablo) { texto.textContent = "No te escuché. Prueba de nuevo."; return; }
+  if (!enviarAudio) { texto.textContent = L("Cancelado.", "Cancelled."); return; }
+  if (!g.hablo) { texto.textContent = L("No te escuché. Prueba de nuevo.", "I didn't hear you. Try again."); return; }
 
-  texto.textContent = "Entendiendo lo que dijiste... (la primera vez puede tardar: descarga el modelo)";
+  texto.textContent = L("Entendiendo lo que dijiste... (la primera vez puede tardar: descarga el modelo)", "Understanding what you said... (the first time can take a while: it downloads the model)");
   try {
     const r = await fetch("/oir", { method: "POST",
       headers: { "Content-Type": "application/octet-stream" }, body: aPCM16(g.trozos, tasa) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || ("error " + r.status));
     const dicho = (d.texto || "").trim();
-    if (!dicho) { texto.textContent = "No te entendí. ¿Puedes repetirlo?"; return; }
+    if (!dicho) { texto.textContent = L("No te entendí. ¿Puedes repetirlo?", "I didn't catch that. Can you repeat it?"); return; }
     msg.value = dicho;
     form.requestSubmit();                          // se envía como cualquier mensaje escrito
   } catch (e) {
     fijarEmocion("triste");
-    texto.textContent = "No pude entenderte: " + e.message;
+    texto.textContent = L("No pude entenderte: ", "I couldn't understand you: ") + e.message;
   }
 }
 
@@ -683,12 +684,14 @@ if (puente) {
     if (!arrastre) return;
     const dx = e.screenX - arrastre.x, dy = e.screenY - arrastre.y;
     if (!arrastre.movido && Math.hypot(dx, dy) < 4) return;
+    if (!arrastre.movido) reaccionar("levantada");
     arrastre.movido = true;
     arrastre.x = e.screenX; arrastre.y = e.screenY;
     puente.mover(dx, dy);
   });
   lienzo.addEventListener("pointerup", () => {
-    if (arrastre && !arrastre.movido && model) { try { model.motion("Tap"); } catch (err) {} }
+    if (arrastre && !arrastre.movido && model) { try { model.motion("Tap"); } catch (err) {} contarToque(); }
+    if (arrastre && arrastre.movido && Math.random() < 0.5) setTimeout(() => reaccionar("soltada", true), 1800);   // a veces se queja al soltarla
     arrastre = null;
   });
   lienzo.addEventListener("dblclick", abrirChat);
@@ -712,6 +715,112 @@ if (puente) {
   });
 }
 
+// =====================================================================
+//  Reacciones espontáneas: comenta cosas por sí sola (sin usar el modelo de lenguaje)
+// =====================================================================
+const REACCIONES_ACTIVAS = true;
+const REACCIONES_CON_VOZ = false;       // true = también las dice en voz alta (gasta créditos de ElevenLabs; las frases cortas se guardan en caché)
+const REACC = {
+  reposoMin: 4, reposoMax: 9,           // minutos sin interacción antes de quejarse (se elige uno al azar en ese rango)
+  enfriamientoS: 20,                    // segundos mínimos entre dos reacciones
+  toques: 4, ventanaToquesS: 3,         // tantos clics seguidos en tan pocos segundos la enojan
+};
+const FRASES = {
+  en: {
+    reposo:   [["...Hello? Did you forget about me?", "triste"], ["Tch. Ignored again, huh.", "enojada"],
+               ["I'm bored. Say something.", "neutral"], ["Not that I care, but are you still alive over there?", "avergonzada"]],
+    levantada:[["H-hey! Put me down!", "sorprendida"], ["Whoa! Where are you taking me?!", "sorprendida"], ["Hands off the merchandise!", "enojada"]],
+    soltada:  [["...Don't just drop me like that.", "enojada"], ["Tch. Rude.", "enojada"], ["Fine. I liked it here anyway.", "neutral"]],
+    toques:   [["Stop poking me!", "enojada"], ["I said stop it!", "enojada"], ["D-do you think this is funny?!", "avergonzada"]],
+  },
+  es: {
+    reposo:   [["...¿Hola? ¿Te olvidaste de mí?", "triste"], ["Tch. Ignorada otra vez, ¿eh?", "enojada"],
+               ["Me aburro. Di algo.", "neutral"], ["No es que me importe, pero ¿sigues vivo por ahí?", "avergonzada"]],
+    levantada:[["¡O-oye! ¡Bájame!", "sorprendida"], ["¡Whoa! ¿A dónde me llevas?!", "sorprendida"], ["¡Con las manos quietas!", "enojada"]],
+    soltada:  [["...No me sueltes así nomás.", "enojada"], ["Tch. Qué grosero.", "enojada"], ["Bien. De todos modos me gustaba este lugar.", "neutral"]],
+    toques:   [["¡Deja de picarme!", "enojada"], ["¡Dije que ya basta!", "enojada"], ["¿T-te parece gracioso?!", "avergonzada"]],
+  },
+};
+let ultimaActividad = Date.now(), ultimaReaccion = 0, proximoReposoMs = 0;
+let toquesRecientes = [], ultimaFrase = {};
+const programarReposo = () => { proximoReposoMs = (REACC.reposoMin + Math.random() * (REACC.reposoMax - REACC.reposoMin)) * 60000; };
+programarReposo();
+function hayActividad() { ultimaActividad = Date.now(); }
+
+function reaccionOcupada() {
+  return form.classList.contains("visible") || hablando || enviar.disabled ||
+    !!(audioActual && !audioActual.paused) || (typeof botonMic !== "undefined" && botonMic.classList.contains("escuchando"));
+}
+function reaccionar(tipo, sinEnfriamiento) {   // devuelve true si dijo algo
+  if (!REACCIONES_ACTIVAS || !model || reaccionOcupada()) return false;
+  if (!sinEnfriamiento && Date.now() - ultimaReaccion < REACC.enfriamientoS * 1000) return false;
+  const lista = (FRASES[personaje.idioma] || FRASES.es)[tipo];
+  if (!lista) return false;
+  let i = Math.floor(Math.random() * lista.length);
+  if (lista.length > 1 && i === ultimaFrase[tipo]) i = (i + 1) % lista.length;     // no repetir la misma dos veces seguidas
+  ultimaFrase[tipo] = i;
+  const [frase, emocion] = lista[i];
+  ultimaReaccion = Date.now();
+  fijarEmocion(emocion);
+  if (REACCIONES_CON_VOZ) decir(frase).then(luegoNeutral).catch(() => escribir(frase, null));
+  else { escribir(frase, null); luegoNeutral(); }
+  return true;
+}
+function revisarReposo() {
+  if (Date.now() - ultimaActividad < proximoReposoMs) return;
+  if (reaccionar("reposo")) { hayActividad(); programarReposo(); }
+}
+function contarToque() {
+  const ahora = Date.now();
+  toquesRecientes = toquesRecientes.filter((t) => ahora - t < REACC.ventanaToquesS * 1000);
+  toquesRecientes.push(ahora);
+  if (toquesRecientes.length >= REACC.toques && reaccionar("toques")) toquesRecientes = [];
+}
+setInterval(revisarReposo, 15000);
+document.addEventListener("pointerdown", hayActividad, true);
+document.addEventListener("keydown", hayActividad, true);
+
+// =====================================================================
+//  Recordatorios: el servidor guarda los pendientes; la página pregunta si ya toca avisar
+// =====================================================================
+let revisandoRecordatorio = false;
+async function revisarRecordatorios() {
+  if (revisandoRecordatorio || !model) return;
+  if (form.classList.contains("visible") || hablando || enviar.disabled ||
+      (audioActual && !audioActual.paused) || (typeof botonMic !== "undefined" && botonMic.classList.contains("escuchando"))) return;   // espera su turno
+  revisandoRecordatorio = true;
+  try {
+    const d = await (await fetch("/recordatorios/vencido")).json();
+    if (d.texto) {
+      hayActividad();
+      fijarEmocion("emocionada");
+      await decir(d.texto);
+      luegoNeutral();
+    }
+  } catch (e) { /* servidor ocupado: se reintenta en el siguiente ciclo */ }
+  revisandoRecordatorio = false;
+}
+setInterval(revisarRecordatorios, 4000);
+
+function traducirInterfaz() {         // textos fijos del HTML, según el idioma que informa el servidor
+  if (personaje.idioma !== "en") return;
+  document.documentElement.lang = "en";
+  msg.placeholder = "Type something...";
+  enviar.textContent = "Send";
+  const reiniciar = document.getElementById("reset");
+  reiniciar.textContent = "Reset"; reiniciar.title = "Clear the conversation";
+  botonMic.title = "Speak: click to start, click again to finish";
+  document.getElementById("silencio").title = "Click: mute. Hover for the volume";
+  const vol = document.getElementById("volumen");
+  vol.title = "Voice volume"; vol.setAttribute("aria-label", "Voice volume");
+  herramientas.title = "Try the expressions without talking to the language model";
+  botonAjustes.textContent = "settings";
+  botonCopiar.textContent = "copy values";
+  pintarBotonVoz();
+  const nota = panel.querySelector(".nota");
+  if (nota) nota.innerHTML = "Move the sliders to see the face live. When you like it, press «copy values» and paste the result inside the matching emotion in <code>EMOCIONES</code> (index.html).";
+}
+
 async function iniciar() {
   try {
     const r = await fetch("/info");
@@ -719,11 +828,12 @@ async function iniciar() {
   } catch (e) { /* se usan los valores por defecto */ }
   if (personaje.oido === false) {
     botonMic.disabled = true;
-    botonMic.title = "Falta instalar faster-whisper (pip install faster-whisper)";
+    botonMic.title = L("Falta instalar faster-whisper (pip install faster-whisper)", "faster-whisper is not installed (pip install faster-whisper)");
   }
   document.title = personaje.nombre;
   document.getElementById("nombre-texto").textContent = personaje.nombre;
-  texto.textContent = "Cargando a " + personaje.nombre + "...";
+  traducirInterfaz();
+  texto.textContent = L("Cargando a ", "Loading ") + personaje.nombre + "...";
 
   try {
     await cargarModelo();
@@ -731,8 +841,8 @@ async function iniciar() {
     await decir(personaje.saludo);
   } catch (e) {
     console.error(e);
-    texto.textContent = "No pude cargar el modelo (" + (personaje.modelo || MODELO_URL) + "): " + e.message +
-      " Revisa que la carpeta 'modelo' tenga el contenido de 'runtime'. Aun así puedes chatear.";
+    texto.textContent = L("No pude cargar el modelo (", "I couldn't load the model (") + (personaje.modelo || MODELO_URL) + "): " + e.message +
+      L(" Revisa que la carpeta 'modelo' tenga el contenido de 'runtime'. Aun así puedes chatear.", " Check that the 'modelo' folder has the contents of 'runtime'. You can still chat.");
   }
 }
 iniciar();

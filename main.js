@@ -109,11 +109,18 @@ function lanzarServidor() {
   probar(0);
 }
 
+let idioma = "es";                                       // lo informa el servidor (IDIOMA en servidor.py)
+const T = (es, en) => (idioma === "en" ? en : es);       // textos del menú según el idioma
+
 function responde() {
   return new Promise((resolver) => {
     const r = http.get(`${URL_BASE}/info`, (resp) => {
-      resp.resume();
-      resolver(resp.statusCode === 200);
+      let cuerpo = "";
+      resp.on("data", (d) => { cuerpo += d; });
+      resp.on("end", () => {
+        try { idioma = JSON.parse(cuerpo).idioma === "en" ? "en" : "es"; } catch (e) { /* se queda como estaba */ }
+        resolver(resp.statusCode === 200);
+      });
     });
     r.on("error", () => resolver(false));
     r.setTimeout(1500, () => { r.destroy(); resolver(false); });
@@ -209,42 +216,42 @@ function escuchar() {              // muestra a la compañera y empieza a grabar
 
 function construirMenu() {
   bandeja.setContextMenu(Menu.buildFromTemplate([
-    { label: `Escribir  (${ATAJO_CHAT.replace("Control", "Ctrl")})`, click: abrirChat },
-    { label: `Hablar con el micrófono  (${ATAJO_MIC.replace("Control", "Ctrl")})`, click: escuchar },
-    { label: "Mostrar / ocultar", click: () => {
+    { label: T("Escribir", "Type") + `  (${ATAJO_CHAT.replace("Control", "Ctrl")})`, click: abrirChat },
+    { label: T("Hablar con el micrófono", "Talk with the microphone") + `  (${ATAJO_MIC.replace("Control", "Ctrl")})`, click: escuchar },
+    { label: T("Mostrar / ocultar", "Show / hide"), click: () => {
         if (!ventana) return;
         if (ventana.isVisible()) ventana.hide(); else ventana.show();
     } },
     { type: "separator" },
-    { label: `Caminar por la pantalla  (${ATAJO_QUIETA.replace("Control", "Ctrl")})`, type: "checkbox",
+    { label: T("Caminar por la pantalla", "Walk around the screen") + `  (${ATAJO_QUIETA.replace("Control", "Ctrl")})`, type: "checkbox",
       checked: ajustes.caminar, click: (item) => alternarCaminar(item.checked) },
-    { label: "Siempre encima", type: "checkbox", checked: ajustes.encima, click: (item) => {
+    { label: T("Siempre encima", "Always on top"), type: "checkbox", checked: ajustes.encima, click: (item) => {
         ajustes.encima = item.checked;
         if (ventana) ventana.setAlwaysOnTop(item.checked);
         guardarAjustes();
     } },
-    { label: "Dejar pasar los clics en las zonas vacías", type: "checkbox",
+    { label: T("Dejar pasar los clics en las zonas vacías", "Let clicks through empty areas"), type: "checkbox",
       checked: ajustes.clicAtraves, click: (item) => {
         ajustes.clicAtraves = item.checked;
         if (!item.checked && ventana) ventana.setIgnoreMouseEvents(false);
         guardarAjustes();
     } },
     ...(app.isPackaged && process.platform === "win32" ? [{
-      label: "Iniciar con Windows", type: "checkbox",
+      label: T("Iniciar con Windows", "Start with Windows"), type: "checkbox",
       checked: app.getLoginItemSettings().openAtLogin,
       click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
     }] : []),
     { type: "separator" },
-    { label: "Reiniciar conversación", click: () => ventana && ventana.webContents.send("reiniciar") },
-    { label: "Ajustar expresiones", click: () => ventana && ventana.webContents.send("herramientas") },
-    { label: "Volver a la esquina de la pantalla", click: () => {
+    { label: T("Reiniciar conversación", "Reset conversation"), click: () => ventana && ventana.webContents.send("reiniciar") },
+    { label: T("Ajustar expresiones", "Adjust expressions"), click: () => ventana && ventana.webContents.send("herramientas") },
+    { label: T("Volver a la esquina de la pantalla", "Back to the screen corner"), click: () => {
         if (!ventana) return;
         const { x, y } = esquinaInferiorDerecha();
         ventana.show();
         ventana.setBounds({ x, y, width: ANCHO, height: alto });
     } },
     { type: "separator" },
-    { label: "Salir", click: () => app.quit() },
+    { label: T("Salir", "Quit"), click: () => app.quit() },
   ]));
 }
 
@@ -252,7 +259,7 @@ function crearBandeja() {
   const icono = nativeImage.createFromPath(path.join(__dirname, "icono.png"))
     .resize({ width: 16, height: 16 });
   bandeja = new Tray(icono);
-  bandeja.setToolTip("Compañera de escritorio");
+  bandeja.setToolTip(T("Compañera de escritorio", "Desktop companion"));
   construirMenu();
   bandeja.on("click", () => {
     if (!ventana) return;

@@ -5,3 +5,4 @@ pydantic
 piper-tts
 faster-whisper
 numpy
+pywin32

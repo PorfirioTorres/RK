@@ -22,10 +22,33 @@ CÓMO SE USA
     Escape cancela).
   - Clic derecho en el ícono de la bandeja: menú (siempre encima, iniciar con Windows, salir...).
   - Volumen de la voz: botón 🔊 junto al micrófono (clic = silenciar; pasa el mouse encima para el deslizador). Se recuerda entre sesiones.
+  - REACCIONES: Ryuko comenta cosas sola: se queja si pasas varios minutos sin hacerle caso (REACC.reposoMin/Max), se asusta si la
+    arrastras, a veces se queja al soltarla y se enoja si le das 4 clics seguidos. No habla en voz alta por defecto (para no gastar
+    creditos de ElevenLabs): pon REACCIONES_CON_VOZ = true en index.html si quieres voz. REACCIONES_ACTIVAS = false las apaga.
+    Las frases estan en FRASES (index.html), en ingles y espanol; se pueden cambiar o agregar.
+  - RECORDATORIOS: dile (escrito o por voz) "remind me in 20 minutes to call my mom", "remind me at 5 pm to stretch", "remind me
+    tomorrow at 9 am...", "remind me on Monday evening...", "remind me in 2 days..." o en espanol "recuerdame en 20 minutos llamar a mi
+    mama", "recuerdame manana a las 5 de la tarde...", "avisame el lunes por la manana...", "recuerdame en 3 dias...". Con un dia pero sin
+    hora avisa a las 9:00 (HORA_POR_DEFECTO en recordatorios.py). Tambien: "what reminders do I have?" (lista), "cancel the reminder
+    about the report" / "cancela el recordatorio de la junta" (borra uno), "cancel the last reminder" (el ultimo) y "cancel all my
+    reminders" (todos). Lo entiende el programa con reglas (no el modelo), asi que es exacto. Se guardan en
+    %APPDATA%\Ryuko\recordatorios.json y sobreviven si cierras Ryuko; si ya paso la hora al abrirla, avisa disculpandose.
+    A la hora lo dice con voz. Si estas escribiendo o ella esta hablando, espera su turno. Reglas en recordatorios.py.
+  - UTILIDADES: "what time is it?" / "que hora es?" y "what's the date today?" / "que dia es hoy?" (las dice exactas desde la PC).
+    Temporizador: "set a timer for 25 minutes" / "ponme un temporizador de media hora"; "how much time is left?"; "cancel the timer".
+    Pomodoro: "start a pomodoro" / "inicia un pomodoro" = 25 min de concentracion y luego avisa y arranca solo un descanso de 5
+    (POMODORO_MIN y DESCANSO_MIN en utilidades.py). Cronometro: "start the stopwatch", "how long has the stopwatch been running?",
+    "stop the stopwatch". Los temporizadores no se mezclan con los recordatorios ("cancel all reminders" no los borra).
+  - MEMORIA: Ryuko recuerda datos tuyos entre sesiones. Dile "my name is Juan" / "me llamo Juan", "remember that I study software
+    engineering" / "recuerda que mi gato se llama Michi". Preguntale "what do you remember about me?" / "que sabes de mi?". Para borrar:
+    "forget that I study software engineering" / "olvida lo de mi gato", o "forget everything" / "olvida todo". Se guarda en
+    %APPDATA%\Ryuko\memoria.json (puedes abrirlo y editarlo a mano; cada linea es una frase). Lo que sabe se agrega a su personalidad, asi
+    que lo usa al platicar. Reiniciar la conversacion NO borra la memoria. Resumen automatico con el modelo: MEMORIA_AUTOMATICA en
+    servidor.py (apagado por defecto; el modelo de 3B puede anotar cosas dudosas, revisa con "what do you remember about me?").
   - IDIOMA: Ryuko habla, escucha y piensa en INGLES (IDIOMA = "en" arriba de servidor.py; "es" vuelve al espanol). Cambia solo la
     voz de Piper (en_US-amy-medium, se descarga la primera vez), el micrófono (Whisper), la voz de Windows de respaldo, el idioma de
     ElevenLabs, el saludo y la personalidad. Si ya habias platicado en espanol, pulsa Reiniciar una vez para que no mezcle idiomas.
-    La interfaz (botones y avisos) sigue en espanol.
+    La interfaz (botones, avisos y menu de la bandeja) tambien cambia de idioma con IDIOMA.
   - EMOCIONES (7): neutral, feliz, triste, sorprendida, enojada, avergonzada, emocionada. Tras hablar, la cara vuelve sola a neutral (EMOCION_DURA_S).
     Para afinarlas: clic derecho en la bandeja > "Ajustar expresiones" -> pulsa una emocion -> "ajustes" -> mueve los
     deslizadores (incluye rubor, lagrimas, ojos estrella/corazon, orejas, etc. de Jian) -> "copiar valores" y pegalos en EMOCIONES (index.html).
