@@ -33,3 +33,12 @@ settings.local.json
 
 # Archivo de fases
 PLAN_FASES.md
+
+# Archivos de Discord
+settings.json
+discord_token.txt
+
+# Conocimiento Personal y Datos Sensibles
+knowledge/
+ryuko_knowledge_db/
+current_screen.png
