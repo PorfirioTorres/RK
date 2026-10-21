@@ -5,6 +5,13 @@ setlocal
 cd /d "%~dp0"
 title Construir Ryuko.exe
 
+rem --- Verificación de Versión y Estado ---
+echo.
+echo [0/4] Verificando estado del proyecto...
+if exist "PLAN_FASES.md" (
+    echo [INFO] Plan de fases detectado. Construyendo versión actualizada...
+)
+
 set PY=python
 %PY% --version >nul 2>nul || set PY=py -3
 %PY% --version >nul 2>nul || ( echo [ERROR] No encuentro Python. Instalalo desde python.org y marca "Add python.exe to PATH". & goto fallo )

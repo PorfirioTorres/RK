@@ -77,6 +77,10 @@ import clima
 import ventana_activa
 import gestos
 import ajustes
+import busqueda_web
+import notificaciones
+import conocimiento_local
+import vision
 from datetime import datetime, timedelta
 
 # ---------- Idioma ----------
@@ -430,7 +434,17 @@ async def ciclo_de_vida(_app):
     if OIDO_PRECARGAR and WhisperModel is not None:
         threading.Thread(target=precargar_oido, daemon=True).start()
     threading.Thread(target=precargar_voz, daemon=True).start()
+
+    # Start Discord Bridge in a separate thread to avoid blocking the event loop
+    def run_discord():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(notificaciones.bridge.start())
+
+    threading.Thread(target=run_discord, daemon=True).start()
+
     yield
+
 
 
 app = FastAPI(lifespan=ciclo_de_vida)
@@ -575,7 +589,33 @@ def responder_directo(texto: str):
         res_dict["gesto"] = g
         return registrar_directo(texto, Respuesta(**res_dict))
 
-    # 9. Utilidades (Hora, Fecha, Timers)
+    # 9. Vision (Eyes)
+    # If the user asks Ryuko to "see" or "look" at something.
+    palabras_vision = ["look at", "see my screen", "what am i doing", "mirame", "mira mi pantalla", "qué estoy haciendo"]
+    if any(p in texto.lower() for p in palabras_vision):
+        descripcion_pantalla = vision.vision.analyze_screen()
+        if descripcion_pantalla:
+            # Inyectamos lo que Ryuko ve en el contexto para que ella lo comente con su personalidad.
+            texto = f"{texto}\n\n[Visual Context]:\n{descripcion_pantalla}"
+
+    # 10. Conocimiento Local (RAG)
+    # Si el usuario pregunta sobre sus notas o datos personales.
+    palabras_rag = ["my notes", "my documents", "remember what i wrote", "mis notas", "mis documentos", "recuerda lo que escribí", "según mis notas"]
+    if any(p in texto.lower() for p in palabras_rag):
+        contexto_local = conocimiento_local.brain.consultar(texto)
+        if contexto_local:
+            texto = f"{texto}\n\n[Local Knowledge Context]:\n{contexto_local}"
+
+    # 11. Búsqueda Web
+    # Si el usuario pregunta por algo actual o pide buscar, usamos DuckDuckGo.
+    palabras_busqueda = ["search", "find", "who is", "what is", "current", "news", "buscar", "quién es", "qué es", "noticias", "actual"]
+    if any(p in texto.lower() for p in palabras_busqueda):
+        info_web = busqueda_web.buscar_informacion(texto)
+        if info_web and "No he encontrado" not in info_web:
+            contexto_web = f"\n\n[Web Search Results]:\n{info_web}"
+            texto = f"{texto}{contexto_web}"
+
+    # 12. Utilidades (Hora, Fecha, Timers)
     u = utilidades.interpretar(texto, ahora)
     if u is not None:
         return responder_utilidad(texto, u, ahora)
@@ -742,6 +782,9 @@ def saludo_inicio():
             detalle = f"Today is {fecha_txt}. You have a reminder for {asunto} at {hora_rec}."
         else:
             detalle = f"Hoy es {fecha_txt}. Tienes un recordatorio de {asunto} a las {hora_rec}."
+
+        # Send notification via Discord if bridge is active
+        threading.Thread(target=lambda: asyncio.run(notificaciones.bridge.send_notification(detalle)), daemon=True).start()
     else:
         detalle = f"Today is {fecha_txt}." if IDIOMA == "en" else f"Hoy es {fecha_txt}."
 
